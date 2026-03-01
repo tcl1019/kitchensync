@@ -375,6 +375,43 @@ def offline():
     return app.send_static_file('offline.html')
 
 
+@app.route('/share', methods=['GET', 'POST'])
+def share_target():
+    """Handle PWA Web Share Target.
+    When users share text/URLs to KitchenSync from their phone,
+    this route receives the shared data and opens the import modal
+    with the text pre-filled.
+    """
+    shared_text = ''
+    shared_url = ''
+
+    if request.method == 'POST':
+        shared_text = request.form.get('text', '')
+        shared_url = request.form.get('url', '')
+    else:
+        shared_text = request.args.get('text', '')
+        shared_url = request.args.get('url', '')
+
+    # Combine text and URL if both present
+    content = shared_text
+    if shared_url and shared_url not in content:
+        content = f"{content}\n{shared_url}".strip()
+
+    # Render main page with shared content to pre-fill the import modal
+    user_name = get_user_name()
+    pantry_items = db.get_all_items()
+    summary = db.get_pantry_summary()
+
+    return render_template(
+        'index.html',
+        user_name=user_name,
+        items=pantry_items,
+        summary=summary,
+        total_items=len(pantry_items),
+        shared_text=content
+    )
+
+
 @app.errorhandler(404)
 def not_found(error):
     """Handle 404 errors."""

@@ -22,5 +22,15 @@
       "purpose": "any"
     }
   ],
-  "categories": ["productivity", "lifestyle"]
+  "categories": ["productivity", "lifestyle"],
+  "share_target": {
+    "action": "/share",
+    "method": "POST",
+    "enctype": "application/x-www-form-urlencoded",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "url": "url"
+    }
+  }
 }

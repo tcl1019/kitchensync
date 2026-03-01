@@ -1464,4 +1464,7 @@ button { cursor: pointer; font-family: inherit; }
     .btn-ghost span:not(.loading) {
         display: none;
     }
+
+    /* Hide bookmarklet section on mobile — paste is the primary method */
+    .import-desktop-only { display: none; }
 }

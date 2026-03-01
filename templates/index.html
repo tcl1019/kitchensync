@@ -137,26 +137,29 @@
             <button class="modal-close">&times;</button>
         </div>
         <div class="modal-body">
-            <!-- Bookmarklet Method -->
+            <!-- Paste Method (Primary — works everywhere) -->
             <div class="import-method">
                 <h3 class="import-method-title">
                     <span class="import-step">1</span>
-                    Use the Bookmarklet
-                </h3>
-                <p class="import-method-desc">Drag this button to your bookmarks bar, then click it on any Instacart order page:</p>
-                <a href="javascript:(function(){var items=[],seen=new Set();var allLi=document.querySelectorAll('li');for(var li of allLi){var text=li.innerText||'';if(!text.includes('Quantity:'))continue;if(li.querySelectorAll('li').length>0)continue;if(li.offsetParent===null)continue;var lines=text.split('\n').map(function(l){return l.trim();}).filter(function(l){return l;});var name=null,qty=1;for(var i=0;i<lines.length;i++){var line=lines[i];if(!name&&line.length>2&&!/^\$/.test(line)&&!/^Quantity/i.test(line)&&!/^Current price/i.test(line)&&!/^Original price/i.test(line)&&!/^Weight /i.test(line)&&!/^\d+$/.test(line)&&!/each$/i.test(line)){name=line;}if(/^Quantity:/i.test(line)){var im=line.match(/Quantity:\s*(\d+(?:\.\d+)?)/i);if(im){qty=Math.round(parseFloat(im[1]));}else if(i+1<lines.length&&/^\d+(?:\.\d+)?/.test(lines[i+1])){qty=Math.round(parseFloat(lines[i+1]));}}}if(name&&!seen.has(name.toLowerCase())){if(qty<1)qty=1;items.push({name:name,qty:qty});seen.add(name.toLowerCase());}}if(items.length===0){alert('No items found. Make sure you are on an Instacart order detail page with items expanded.');return;}var fmt=items.map(function(it){return it.name+' | qty: '+it.qty;}).join('\n');navigator.clipboard.writeText(fmt).then(function(){alert('Copied '+items.length+' items! Paste into KitchenSync.');}).catch(function(){var ta=document.createElement('textarea');ta.value=fmt;document.body.appendChild(ta);ta.select();document.execCommand('copy');document.body.removeChild(ta);alert('Copied '+items.length+' items! Paste into KitchenSync.');});})();" class="btn-bookmarklet">Extract from Instacart</a>
-            </div>
-
-            <!-- Paste Method -->
-            <div class="import-method">
-                <h3 class="import-method-title">
-                    <span class="import-step">2</span>
                     Paste Order Text
                 </h3>
+                <p class="import-method-desc">
+                    Open your Instacart order, select all the item text, copy it, and paste below.
+                </p>
                 <form id="instacart-form">
-                    <textarea id="instacart-text" placeholder="Paste your copied Instacart order text here..." rows="5"></textarea>
+                    <textarea id="instacart-text" placeholder="Paste your Instacart order text here...&#10;&#10;Tip: On mobile, long-press → Select All → Copy from your Instacart order page in the browser." rows="5"></textarea>
                     <button type="submit" class="btn-primary btn-block">Import Items</button>
                 </form>
+            </div>
+
+            <!-- Bookmarklet Method (Desktop only) -->
+            <div class="import-method import-desktop-only">
+                <h3 class="import-method-title">
+                    <span class="import-step">2</span>
+                    Auto-Extract (Desktop)
+                </h3>
+                <p class="import-method-desc">On a computer, drag this button to your bookmarks bar, then click it on any Instacart order page to auto-copy items:</p>
+                <a href="javascript:(function(){var items=[],seen=new Set();var allLi=document.querySelectorAll('li');for(var li of allLi){var text=li.innerText||'';if(!text.includes('Quantity:'))continue;if(li.querySelectorAll('li').length>0)continue;if(li.offsetParent===null)continue;var lines=text.split('\n').map(function(l){return l.trim();}).filter(function(l){return l;});var name=null,qty=1;for(var i=0;i<lines.length;i++){var line=lines[i];if(!name&&line.length>2&&!/^\$/.test(line)&&!/^Quantity/i.test(line)&&!/^Current price/i.test(line)&&!/^Original price/i.test(line)&&!/^Weight /i.test(line)&&!/^\d+$/.test(line)&&!/each$/i.test(line)){name=line;}if(/^Quantity:/i.test(line)){var im=line.match(/Quantity:\s*(\d+(?:\.\d+)?)/i);if(im){qty=Math.round(parseFloat(im[1]));}else if(i+1<lines.length&&/^\d+(?:\.\d+)?/.test(lines[i+1])){qty=Math.round(parseFloat(lines[i+1]));}}}if(name&&!seen.has(name.toLowerCase())){if(qty<1)qty=1;items.push({name:name,qty:qty});seen.add(name.toLowerCase());}}if(items.length===0){alert('No items found. Make sure you are on an Instacart order detail page with items expanded.');return;}var fmt=items.map(function(it){return it.name+' | qty: '+it.qty;}).join('\n');navigator.clipboard.writeText(fmt).then(function(){alert('Copied '+items.length+' items! Paste into KitchenSync.');}).catch(function(){var ta=document.createElement('textarea');ta.value=fmt;document.body.appendChild(ta);ta.select();document.execCommand('copy');document.body.removeChild(ta);alert('Copied '+items.length+' items! Paste into KitchenSync.');});})();" class="btn-bookmarklet">Extract from Instacart</a>
             </div>
         </div>
     </div>
@@ -190,4 +193,18 @@
 {% block extra_js %}
 <script src="{{ url_for('static', filename='js/pantry.js') }}"></script>
 <script src="{{ url_for('static', filename='js/recipes.js') }}"></script>
+{% if shared_text %}
+<script>
+    // Auto-open import modal with shared text pre-filled
+    document.addEventListener('DOMContentLoaded', function() {
+        var textarea = document.getElementById('instacart-text');
+        if (textarea) {
+            textarea.value = {{ shared_text|tojson }};
+        }
+        if (typeof openModal === 'function') {
+            openModal('import-modal');
+        }
+    });
+</script>
+{% endif %}
 {% endblock %}
