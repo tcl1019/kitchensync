@@ -10,6 +10,45 @@ from typing import List, Dict, Tuple, Any
 from anthropic import Anthropic
 
 
+UNIT_HINTS = {
+    # Liquids
+    'milk': 'gal', 'juice': 'oz', 'water': 'gal', 'soda': 'L',
+    'wine': 'bottle', 'beer': 'pack', 'broth': 'oz', 'stock': 'oz',
+    'oil': 'oz', 'vinegar': 'oz', 'cream': 'oz', 'lemonade': 'oz',
+    # Produce by weight
+    'chicken': 'lbs', 'beef': 'lbs', 'pork': 'lbs', 'turkey': 'lbs',
+    'salmon': 'lbs', 'fish': 'lbs', 'steak': 'lbs', 'ground': 'lbs',
+    'lamb': 'lbs', 'cheese': 'oz', 'deli': 'lbs', 'bacon': 'oz',
+    # Produce by count
+    'banana': 'ct', 'apple': 'ct', 'orange': 'ct', 'lemon': 'ct',
+    'lime': 'ct', 'avocado': 'ct', 'peach': 'ct', 'pear': 'ct',
+    'egg': 'dozen', 'onion': 'ct', 'pepper': 'ct', 'potato': 'ct',
+    'tomato': 'ct', 'cucumber': 'ct', 'garlic': 'ct', 'mango': 'ct',
+    # Packaged
+    'cereal': 'box', 'chips': 'bag', 'crackers': 'box', 'cookies': 'box',
+    'granola': 'bag', 'nuts': 'bag', 'rice': 'bag', 'pasta': 'box',
+    'flour': 'bag', 'sugar': 'bag', 'fries': 'bag',
+    # Canned
+    'beans': 'can', 'soup': 'can', 'tuna': 'can', 'corn': 'can',
+    'coconut milk': 'can',
+    # Bread/baked
+    'bread': 'loaf', 'bagel': 'pack', 'tortilla': 'pack', 'bun': 'pack',
+    'muffin': 'pack', 'roll': 'pack', 'cinnamon roll': 'pack',
+    # Spices
+    'cinnamon': 'oz', 'salt': 'oz', 'paprika': 'oz',
+    'cumin': 'oz', 'oregano': 'oz', 'basil': 'oz',
+}
+
+
+def infer_unit(item_name: str):
+    """Infer a likely unit from the item name using keyword matching."""
+    name_lower = item_name.lower()
+    for keyword, unit in UNIT_HINTS.items():
+        if keyword in name_lower:
+            return unit
+    return None
+
+
 class InstacartParser:
     """Parse Instacart order history text to extract items."""
 

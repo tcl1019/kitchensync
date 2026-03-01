@@ -23,7 +23,7 @@ from config import (
     ANTHROPIC_API_KEY, MAX_RECIPES_SUGGESTIONS
 )
 from database import Database
-from parsers import InstacartParser
+from parsers import InstacartParser, infer_unit
 from recipe_suggester import RecipeSuggester
 
 
@@ -124,6 +124,8 @@ def add_item():
         return jsonify({'error': 'Invalid quantity'}), 400
 
     unit = data.get('unit', '').strip()
+    if not unit:
+        unit = infer_unit(name)
     category = data.get('category', 'Other').strip()
     notes = data.get('notes', '').strip() or None
 
@@ -233,8 +235,9 @@ def import_instacart():
                 existing_item = item
                 break
 
-        # Infer category
+        # Infer category and unit
         category = parser.infer_category(name)
+        unit = infer_unit(name)
 
         if existing_item:
             # Update existing item quantity
@@ -251,7 +254,7 @@ def import_instacart():
             item_id = db.add_item(
                 name=name,
                 quantity=quantity,
-                unit=None,
+                unit=unit,
                 category=category,
                 added_by=user_name,
                 notes='Imported from Instacart'
@@ -318,12 +321,13 @@ def import_screenshot():
                         "type": "text",
                         "text": """Look at this screenshot of a grocery order (likely Instacart or similar).
 Extract every grocery item you can see. For each item, provide:
-- name: the product name
+- name: the product name (clean, without brand sizing info)
 - quantity: how many (default 1 if not visible)
+- unit: the most appropriate unit (e.g. "lbs", "oz", "gal", "ct", "bag", "box", "can", "loaf", "dozen"). Use null if unknown.
 - category: one of Vegetables, Fruits, Dairy, Meat, Pantry, Frozen, Beverages, Other
 
 Return ONLY a JSON array, no other text. Example:
-[{"name": "Organic Bananas", "quantity": 2, "category": "Fruits"}, {"name": "Whole Milk", "quantity": 1, "category": "Dairy"}]
+[{"name": "Organic Bananas", "quantity": 2, "unit": "ct", "category": "Fruits"}, {"name": "Whole Milk", "quantity": 1, "unit": "gal", "category": "Dairy"}]
 
 If you can't identify any grocery items, return an empty array: []"""
                     }
@@ -355,6 +359,7 @@ If you can't identify any grocery items, return an empty array: []"""
         name = item_data.get('name', '').strip()
         quantity = item_data.get('quantity', 1)
         category = item_data.get('category', 'Other')
+        unit = item_data.get('unit') or infer_unit(name)
 
         if not name:
             continue
@@ -377,7 +382,7 @@ If you can't identify any grocery items, return an empty array: []"""
                               'quantity': new_qty, 'action': 'updated'})
         else:
             item_id = db.add_item(
-                name=name, quantity=quantity, unit=None,
+                name=name, quantity=quantity, unit=unit,
                 category=category, added_by=user_name,
                 notes='Imported from screenshot'
             )
@@ -554,6 +559,26 @@ def internal_error(error):
 def inject_now():
     """Make datetime available in templates."""
     return {'now': datetime.now()}
+
+
+CATEGORY_EMOJI = {
+    'Vegetables': '\U0001F96C',
+    'Fruits': '\U0001F34E',
+    'Dairy': '\U0001F9C0',
+    'Meat': '\U0001F969',
+    'Pantry': '\U0001FAD9',
+    'Frozen': '\U0001F9CA',
+    'Beverages': '\U0001F964',
+    'Other': '\U0001F4E6',
+}
+
+
+@app.context_processor
+def inject_category_helpers():
+    """Provide category_emoji() function to templates."""
+    def category_emoji(cat):
+        return CATEGORY_EMOJI.get(cat or 'Other', '\U0001F4E6')
+    return {'category_emoji': category_emoji}
 
 
 # ============================================================================
