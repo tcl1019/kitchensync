@@ -5,6 +5,7 @@ Main application file with all routes and logic.
 
 import os
 import json
+import base64
 from datetime import datetime
 from functools import wraps
 from pathlib import Path
@@ -267,6 +268,127 @@ def import_instacart():
         'count': len(added_items),
         'items': added_items,
         'message': f'Imported {len(added_items)} items from Instacart order'
+    }), 201
+
+
+@app.route('/api/import-screenshot', methods=['POST'])
+@ensure_api_key
+def import_screenshot():
+    """
+    Extract grocery items from a screenshot using Claude Vision.
+    Accepts an image file upload and returns parsed items.
+    """
+    if 'image' not in request.files:
+        return jsonify({'error': 'No image uploaded'}), 400
+
+    file = request.files['image']
+    if not file.filename:
+        return jsonify({'error': 'No file selected'}), 400
+
+    # Read and encode image
+    image_data = file.read()
+    if len(image_data) > 10 * 1024 * 1024:  # 10MB limit
+        return jsonify({'error': 'Image too large (max 10MB)'}), 400
+
+    # Determine media type
+    ext = file.filename.rsplit('.', 1)[-1].lower() if '.' in file.filename else ''
+    media_types = {'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'png': 'image/png',
+                   'gif': 'image/gif', 'webp': 'image/webp', 'heic': 'image/heic'}
+    media_type = media_types.get(ext, file.content_type or 'image/jpeg')
+
+    b64_image = base64.standard_b64encode(image_data).decode('utf-8')
+
+    # Ask Claude to extract items from the screenshot
+    try:
+        response = anthropic_client.messages.create(
+            model="claude-sonnet-4-5-20250929",
+            max_tokens=2000,
+            messages=[{
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": media_type,
+                            "data": b64_image
+                        }
+                    },
+                    {
+                        "type": "text",
+                        "text": """Look at this screenshot of a grocery order (likely Instacart or similar).
+Extract every grocery item you can see. For each item, provide:
+- name: the product name
+- quantity: how many (default 1 if not visible)
+- category: one of Vegetables, Fruits, Dairy, Meat, Pantry, Frozen, Beverages, Other
+
+Return ONLY a JSON array, no other text. Example:
+[{"name": "Organic Bananas", "quantity": 2, "category": "Fruits"}, {"name": "Whole Milk", "quantity": 1, "category": "Dairy"}]
+
+If you can't identify any grocery items, return an empty array: []"""
+                    }
+                ]
+            }]
+        )
+
+        # Parse Claude's response
+        result_text = response.content[0].text.strip()
+        # Extract JSON from response (handle potential markdown code blocks)
+        if result_text.startswith('```'):
+            result_text = result_text.split('\n', 1)[1].rsplit('```', 1)[0].strip()
+
+        parsed_items = json.loads(result_text)
+
+        if not parsed_items:
+            return jsonify({'error': 'No grocery items found in this image. Try a clearer screenshot.'}), 400
+
+    except json.JSONDecodeError:
+        return jsonify({'error': 'Could not parse items from image. Try a clearer screenshot.'}), 400
+    except Exception as e:
+        return jsonify({'error': f'Failed to analyze image: {str(e)}'}), 500
+
+    # Add items to database
+    user_name = get_user_name()
+    added_items = []
+
+    for item_data in parsed_items:
+        name = item_data.get('name', '').strip()
+        quantity = item_data.get('quantity', 1)
+        category = item_data.get('category', 'Other')
+
+        if not name:
+            continue
+
+        try:
+            quantity = max(1, int(float(quantity)))
+        except (ValueError, TypeError):
+            quantity = 1
+
+        # Check for existing item
+        existing_items = db.get_all_items()
+        existing_item = next(
+            (i for i in existing_items if i['name'].lower() == name.lower()), None
+        )
+
+        if existing_item:
+            new_qty = existing_item['quantity'] + quantity
+            db.update_item(existing_item['id'], quantity=new_qty)
+            added_items.append({'id': existing_item['id'], 'name': name,
+                              'quantity': new_qty, 'action': 'updated'})
+        else:
+            item_id = db.add_item(
+                name=name, quantity=quantity, unit=None,
+                category=category, added_by=user_name,
+                notes='Imported from screenshot'
+            )
+            added_items.append({'id': item_id, 'name': name,
+                              'quantity': quantity, 'action': 'added'})
+
+    return jsonify({
+        'success': True,
+        'count': len(added_items),
+        'items': added_items,
+        'message': f'Found and imported {len(added_items)} items from screenshot'
     }), 201
 
 

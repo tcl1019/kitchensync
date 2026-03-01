@@ -346,6 +346,79 @@ async function clearPantry() {
 }
 
 // ============================================================================
+// Screenshot Import
+// ============================================================================
+
+let selectedScreenshot = null;
+
+function handleScreenshotSelect(file) {
+    if (!file || !file.type.startsWith('image/')) {
+        showToast('Please select an image file', 'error');
+        return;
+    }
+
+    selectedScreenshot = file;
+
+    // Show preview
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        document.getElementById('screenshot-img').src = e.target.result;
+        document.getElementById('screenshot-preview').classList.remove('hidden');
+        document.getElementById('screenshot-upload-area').style.display = 'none';
+    };
+    reader.readAsDataURL(file);
+}
+
+function clearScreenshot() {
+    selectedScreenshot = null;
+    document.getElementById('screenshot-input').value = '';
+    document.getElementById('screenshot-preview').classList.add('hidden');
+    document.getElementById('screenshot-upload-area').style.display = 'flex';
+}
+
+async function importScreenshot() {
+    if (!selectedScreenshot) {
+        showToast('No screenshot selected', 'error');
+        return;
+    }
+
+    const btn = document.getElementById('screenshot-import-btn');
+    const loading = document.getElementById('screenshot-loading');
+    const btnText = document.getElementById('screenshot-import-text');
+
+    btn.disabled = true;
+    loading.classList.remove('hidden');
+    btnText.textContent = 'Reading items...';
+
+    try {
+        const formData = new FormData();
+        formData.append('image', selectedScreenshot);
+
+        const response = await fetch('/api/import-screenshot', {
+            method: 'POST',
+            body: formData
+        });
+
+        const json = await response.json();
+
+        if (!response.ok) {
+            throw new Error(json.error || `HTTP ${response.status}`);
+        }
+
+        showToast(json.message, 'success');
+        closeModal('import-modal');
+        clearScreenshot();
+        refreshPantryItems();
+    } catch (error) {
+        showToast(error.message, 'error');
+    } finally {
+        btn.disabled = false;
+        loading.classList.add('hidden');
+        btnText.textContent = 'Import from Screenshot';
+    }
+}
+
+// ============================================================================
 // Event Listeners
 // ============================================================================
 
@@ -387,6 +460,19 @@ document.addEventListener('DOMContentLoaded', () => {
     const sortSelect = document.getElementById('sort-select');
     if (sortSelect) {
         sortSelect.addEventListener('change', (e) => sortItems(e.target.value));
+    }
+
+    // Screenshot import
+    const screenshotInput = document.getElementById('screenshot-input');
+    if (screenshotInput) {
+        screenshotInput.addEventListener('change', (e) => {
+            if (e.target.files[0]) handleScreenshotSelect(e.target.files[0]);
+        });
+    }
+
+    const screenshotImportBtn = document.getElementById('screenshot-import-btn');
+    if (screenshotImportBtn) {
+        screenshotImportBtn.addEventListener('click', importScreenshot);
     }
 
     // Initialize category filters from server-rendered items

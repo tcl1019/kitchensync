@@ -137,17 +137,43 @@
             <button class="modal-close">&times;</button>
         </div>
         <div class="modal-body">
-            <!-- Paste Method (Primary — works everywhere) -->
+            <!-- Screenshot Method (Primary on mobile) -->
             <div class="import-method">
                 <h3 class="import-method-title">
                     <span class="import-step">1</span>
-                    Paste Order Text
+                    Screenshot Import
                 </h3>
                 <p class="import-method-desc">
-                    Open your Instacart order, select all the item text, copy it, and paste below.
+                    Screenshot your Instacart order and upload it — AI reads the items automatically.
                 </p>
+                <div id="screenshot-upload-area" class="screenshot-upload-area">
+                    <input type="file" id="screenshot-input" accept="image/*" hidden>
+                    <button type="button" id="screenshot-btn" class="btn-screenshot" onclick="document.getElementById('screenshot-input').click()">
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+                        Upload Screenshot
+                    </button>
+                    <span class="screenshot-hint">or drag &amp; drop an image</span>
+                </div>
+                <div id="screenshot-preview" class="screenshot-preview hidden">
+                    <img id="screenshot-img" src="" alt="Preview">
+                    <div class="screenshot-actions">
+                        <button type="button" id="screenshot-import-btn" class="btn-primary btn-block">
+                            <span class="loading hidden" id="screenshot-loading"></span>
+                            <span id="screenshot-import-text">Import from Screenshot</span>
+                        </button>
+                        <button type="button" class="btn-secondary btn-block" onclick="clearScreenshot()" style="margin-top:0.5rem">Choose Different Image</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Paste Method -->
+            <div class="import-method">
+                <h3 class="import-method-title">
+                    <span class="import-step">2</span>
+                    Paste Order Text
+                </h3>
                 <form id="instacart-form">
-                    <textarea id="instacart-text" placeholder="Paste your Instacart order text here...&#10;&#10;Tip: On mobile, long-press → Select All → Copy from your Instacart order page in the browser." rows="5"></textarea>
+                    <textarea id="instacart-text" placeholder="Or paste your Instacart order text here..." rows="4"></textarea>
                     <button type="submit" class="btn-primary btn-block">Import Items</button>
                 </form>
             </div>
@@ -155,7 +181,7 @@
             <!-- Bookmarklet Method (Desktop only) -->
             <div class="import-method import-desktop-only">
                 <h3 class="import-method-title">
-                    <span class="import-step">2</span>
+                    <span class="import-step">3</span>
                     Auto-Extract (Desktop)
                 </h3>
                 <p class="import-method-desc">On a computer, drag this button to your bookmarks bar, then click it on any Instacart order page to auto-copy items:</p>
