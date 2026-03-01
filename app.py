@@ -1,0 +1,412 @@
+"""
+PantryPal: A Flask web app for household pantry inventory and recipe suggestions.
+Main application file with all routes and logic.
+"""
+
+import os
+import json
+from datetime import datetime
+from functools import wraps
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+# Load environment variables from .env file BEFORE any config imports
+load_dotenv()
+
+from flask import Flask, render_template, request, jsonify, session
+from anthropic import Anthropic
+
+from config import (
+    DEBUG, TESTING, SECRET_KEY, DATABASE_PATH,
+    ANTHROPIC_API_KEY, MAX_RECIPES_SUGGESTIONS
+)
+from database import Database
+from parsers import InstacartParser
+from recipe_suggester import RecipeSuggester
+
+
+# Initialize Flask app
+app = Flask(__name__)
+app.secret_key = SECRET_KEY
+app.config['DEBUG'] = DEBUG
+app.config['TESTING'] = TESTING
+
+# Initialize database
+db = Database(DATABASE_PATH)
+db.init_db()  # Ensure tables exist (safe to call multiple times)
+
+# Initialize Anthropic client
+anthropic_client = Anthropic(api_key=ANTHROPIC_API_KEY) if ANTHROPIC_API_KEY else None
+parser = InstacartParser(anthropic_client)
+recipe_suggester = RecipeSuggester(anthropic_client, MAX_RECIPES_SUGGESTIONS)
+
+
+# ============================================================================
+# Utility Functions
+# ============================================================================
+
+def get_user_name():
+    """Get the current user's name from session or cookie."""
+    if 'user_name' not in session:
+        session['user_name'] = request.cookies.get('user_name', 'Guest')
+    return session['user_name']
+
+
+def set_user_name(name: str):
+    """Set the current user's name in session."""
+    session['user_name'] = name
+
+
+def ensure_api_key(f):
+    """Decorator to ensure ANTHROPIC_API_KEY is configured."""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not ANTHROPIC_API_KEY:
+            return jsonify({
+                'error': 'ANTHROPIC_API_KEY not configured. Please set it in .env file.'
+            }), 500
+        return f(*args, **kwargs)
+    return decorated_function
+
+
+# ============================================================================
+# Routes
+# ============================================================================
+
+@app.route('/')
+def index():
+    """Main dashboard showing pantry inventory and recipe suggestions."""
+    user_name = get_user_name()
+    pantry_items = db.get_all_items()
+    summary = db.get_pantry_summary()
+
+    return render_template(
+        'index.html',
+        user_name=user_name,
+        items=pantry_items,
+        summary=summary,
+        total_items=len(pantry_items)
+    )
+
+
+@app.route('/api/set-user', methods=['POST'])
+def set_user():
+    """Set the current user's name."""
+    data = request.get_json()
+    name = data.get('name', 'Guest').strip()
+
+    if not name or len(name) > 50:
+        return jsonify({'error': 'Invalid name'}), 400
+
+    set_user_name(name)
+    return jsonify({'success': True, 'name': name})
+
+
+@app.route('/api/add-item', methods=['POST'])
+def add_item():
+    """Add a single item to the pantry."""
+    data = request.get_json()
+    user_name = get_user_name()
+
+    # Validate input
+    name = data.get('name', '').strip()
+    if not name or len(name) > 200:
+        return jsonify({'error': 'Invalid item name'}), 400
+
+    quantity = data.get('quantity', 1)
+    try:
+        quantity = float(quantity)
+        if quantity <= 0:
+            raise ValueError
+    except (ValueError, TypeError):
+        return jsonify({'error': 'Invalid quantity'}), 400
+
+    unit = data.get('unit', '').strip()
+    category = data.get('category', 'Other').strip()
+    notes = data.get('notes', '').strip() or None
+
+    # Add to database
+    item_id = db.add_item(
+        name=name,
+        quantity=quantity,
+        unit=unit if unit else None,
+        category=category,
+        added_by=user_name,
+        notes=notes
+    )
+
+    return jsonify({
+        'success': True,
+        'item_id': item_id,
+        'message': f'Added {name} to pantry'
+    }), 201
+
+
+@app.route('/api/remove-item/<int:item_id>', methods=['POST'])
+def remove_item(item_id):
+    """Remove an item from the pantry."""
+    item = db.get_item_by_id(item_id)
+    if not item:
+        return jsonify({'error': 'Item not found'}), 404
+
+    success = db.remove_item(item_id)
+    if success:
+        return jsonify({
+            'success': True,
+            'message': f'Removed {item["name"]} from pantry'
+        })
+    else:
+        return jsonify({'error': 'Failed to remove item'}), 500
+
+
+@app.route('/api/update-item/<int:item_id>', methods=['POST'])
+def update_item(item_id):
+    """Update an existing pantry item."""
+    item = db.get_item_by_id(item_id)
+    if not item:
+        return jsonify({'error': 'Item not found'}), 404
+
+    data = request.get_json()
+
+    # Validate quantity if provided
+    quantity = data.get('quantity')
+    if quantity is not None:
+        try:
+            quantity = float(quantity)
+            if quantity <= 0:
+                raise ValueError
+        except (ValueError, TypeError):
+            return jsonify({'error': 'Invalid quantity'}), 400
+
+    unit = data.get('unit', '').strip() or None
+    notes = data.get('notes', '').strip() or None
+
+    success = db.update_item(item_id, quantity=quantity, unit=unit, notes=notes)
+
+    if success:
+        return jsonify({'success': True, 'message': 'Item updated'})
+    else:
+        return jsonify({'error': 'Failed to update item'}), 500
+
+
+@app.route('/api/import-instacart', methods=['POST'])
+def import_instacart():
+    """
+    Parse Instacart order text and add items to pantry.
+    Expects JSON with 'text' field containing the order confirmation text.
+    """
+    data = request.get_json()
+    text = data.get('text', '').strip()
+    user_name = get_user_name()
+
+    if not text:
+        return jsonify({'error': 'No text provided'}), 400
+
+    if len(text) > 10000:
+        return jsonify({'error': 'Text too long'}), 400
+
+    # Parse items from text
+    parsed_items = parser.parse_text(text)
+
+    if not parsed_items:
+        return jsonify({
+            'error': 'Could not parse any items from the provided text. '
+                     'Please check the format and try again.'
+        }), 400
+
+    # Add items to database, checking for duplicates
+    added_items = []
+    for item_data in parsed_items:
+        name = item_data.get('name', '').strip()
+        quantity = item_data.get('quantity', 1)
+
+        if not name:
+            continue
+
+        # Check if item already exists in pantry
+        existing_items = db.get_all_items()
+        existing_item = None
+        for item in existing_items:
+            if item['name'].lower() == name.lower():
+                existing_item = item
+                break
+
+        # Infer category
+        category = parser.infer_category(name)
+
+        if existing_item:
+            # Update existing item quantity
+            new_quantity = existing_item['quantity'] + quantity
+            db.update_item(existing_item['id'], quantity=new_quantity)
+            added_items.append({
+                'id': existing_item['id'],
+                'name': name,
+                'quantity': new_quantity,
+                'action': 'updated'
+            })
+        else:
+            # Add new item
+            item_id = db.add_item(
+                name=name,
+                quantity=quantity,
+                unit=None,
+                category=category,
+                added_by=user_name,
+                notes='Imported from Instacart'
+            )
+            added_items.append({
+                'id': item_id,
+                'name': name,
+                'quantity': quantity,
+                'action': 'added'
+            })
+
+    return jsonify({
+        'success': True,
+        'count': len(added_items),
+        'items': added_items,
+        'message': f'Imported {len(added_items)} items from Instacart order'
+    }), 201
+
+
+@app.route('/api/suggest-recipes', methods=['POST'])
+@ensure_api_key
+def suggest_recipes():
+    """
+    Generate recipe suggestions based on current pantry inventory.
+    Uses Claude API to intelligently suggest recipes.
+    """
+    pantry_items = db.get_all_items()
+
+    if not pantry_items:
+        return jsonify({
+            'error': 'Your pantry is empty. Add some items first to get recipe suggestions.'
+        }), 400
+
+    # Get recipe suggestions from Claude
+    recipes = recipe_suggester.suggest_recipes(pantry_items)
+
+    if not recipes:
+        return jsonify({
+            'error': 'Could not generate recipe suggestions. Please try again.'
+        }), 500
+
+    return jsonify({
+        'success': True,
+        'recipes': recipes,
+        'count': len(recipes)
+    })
+
+
+@app.route('/api/shopping-list', methods=['POST'])
+def shopping_list():
+    """
+    Generate a shopping list for a recipe based on what's missing from pantry.
+    Expects JSON with 'recipe' field containing the recipe dict.
+    """
+    data = request.get_json()
+    recipe = data.get('recipe')
+
+    if not recipe:
+        return jsonify({'error': 'No recipe provided'}), 400
+
+    pantry_items = db.get_all_items()
+    missing = recipe_suggester.get_shopping_list(recipe, pantry_items)
+
+    return jsonify({
+        'success': True,
+        'recipe_name': recipe.get('name', 'Recipe'),
+        'missing_items': missing,
+        'count': len(missing)
+    })
+
+
+@app.route('/api/pantry-summary', methods=['GET'])
+def pantry_summary():
+    """Get a summary of the pantry."""
+    summary = db.get_pantry_summary()
+    return jsonify(summary)
+
+
+@app.route('/api/pantry-items', methods=['GET'])
+def pantry_items_api():
+    """Get all pantry items as JSON."""
+    items = db.get_all_items()
+    return jsonify({'items': items})
+
+
+@app.route('/api/pantry-items-by-category', methods=['GET'])
+def pantry_items_by_category():
+    """Get pantry items grouped by category."""
+    categorized = db.get_items_by_category()
+    return jsonify(categorized)
+
+
+@app.route('/api/clear-pantry', methods=['POST'])
+def clear_pantry():
+    """Clear all items from the pantry. Use with caution."""
+    count = db.clear_pantry()
+    return jsonify({
+        'success': True,
+        'cleared_count': count,
+        'message': f'Cleared {count} items from pantry'
+    })
+
+
+# ============================================================================
+# Error Handlers
+# ============================================================================
+
+
+# ============================================================================
+# PWA Routes
+# ============================================================================
+
+@app.route('/manifest.json')
+def manifest():
+    """Serve the PWA manifest from the static directory."""
+    return app.send_static_file('manifest.json')
+
+
+@app.route('/offline.html')
+def offline():
+    """Serve the offline fallback page."""
+    return app.send_static_file('offline.html')
+
+
+@app.errorhandler(404)
+def not_found(error):
+    """Handle 404 errors."""
+    return jsonify({'error': 'Not found'}), 404
+
+
+@app.errorhandler(500)
+def internal_error(error):
+    """Handle 500 errors."""
+    return jsonify({'error': 'Internal server error'}), 500
+
+
+# ============================================================================
+# Context Processors
+# ============================================================================
+
+@app.context_processor
+def inject_now():
+    """Make datetime available in templates."""
+    return {'now': datetime.now()}
+
+
+# ============================================================================
+# Main Entry Point
+# ============================================================================
+
+if __name__ == '__main__':
+    # Run Flask development server
+    port = int(os.environ.get('PORT', 5000))
+    app.run(
+        host='0.0.0.0',
+        port=port,
+        debug=DEBUG,
+        use_reloader=True
+    )
