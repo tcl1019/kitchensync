@@ -236,10 +236,53 @@ function setupButtonEffects() {
 }
 
 // ============================================================================
+// Theme Toggle
+// ============================================================================
+
+function setupThemeToggle() {
+    const btn = document.getElementById('theme-toggle');
+    const moonIcon = document.getElementById('theme-icon-moon');
+    const sunIcon = document.getElementById('theme-icon-sun');
+    if (!btn || !moonIcon || !sunIcon) return;
+
+    // Determine initial theme
+    const saved = localStorage.getItem('ks-theme');
+    let theme;
+    if (saved) {
+        theme = saved;
+    } else {
+        theme = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+    }
+    applyTheme(theme);
+
+    btn.addEventListener('click', () => {
+        const current = document.body.getAttribute('data-theme') || 'dark';
+        const next = current === 'dark' ? 'light' : 'dark';
+        applyTheme(next);
+        localStorage.setItem('ks-theme', next);
+    });
+
+    function applyTheme(t) {
+        document.body.setAttribute('data-theme', t);
+        if (t === 'light') {
+            moonIcon.classList.add('hidden');
+            sunIcon.classList.remove('hidden');
+        } else {
+            moonIcon.classList.remove('hidden');
+            sunIcon.classList.add('hidden');
+        }
+        // Update theme-color meta for PWA
+        const meta = document.querySelector('meta[name="theme-color"]');
+        if (meta) meta.content = t === 'light' ? '#F5F5F7' : '#111115';
+    }
+}
+
+// ============================================================================
 // Init
 // ============================================================================
 
 document.addEventListener('DOMContentLoaded', () => {
+    setupThemeToggle();
     setupTabs();
     setupModalHandlers();
     setupImportModal();

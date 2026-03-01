@@ -370,6 +370,9 @@ async function refreshPantryItems() {
         // Render relative dates
         renderDates();
 
+        // Re-apply view toggle after DOM rebuild
+        applyView(currentView);
+
         // Extract categories with counts and update filter chips
         const catCounts = {};
         items.forEach(i => {
@@ -669,6 +672,42 @@ function setupUnitSuggestion() {
 }
 
 // ============================================================================
+// View Toggle (Grid / List)
+// ============================================================================
+
+let currentView = localStorage.getItem('ks-pantry-view') || 'grid';
+
+function setupViewToggle() {
+    const container = document.getElementById('view-toggle');
+    if (!container) return;
+
+    // Apply saved view on load
+    applyView(currentView);
+
+    container.querySelectorAll('.view-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const view = btn.dataset.view;
+            if (view === currentView) return;
+            currentView = view;
+            localStorage.setItem('ks-pantry-view', view);
+            applyView(view);
+        });
+    });
+}
+
+function applyView(view) {
+    const grid = document.getElementById('pantry-items-container');
+    if (grid) {
+        grid.classList.toggle('list-view', view === 'list');
+    }
+
+    // Update active button
+    document.querySelectorAll('.view-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.view === view);
+    });
+}
+
+// ============================================================================
 // Event Listeners
 // ============================================================================
 
@@ -735,6 +774,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Setup unit auto-suggestion
     setupUnitSuggestion();
+
+    // Setup view toggle (grid/list)
+    setupViewToggle();
 
     // Focus add input
     setTimeout(() => {

@@ -403,7 +403,10 @@ def suggest_recipes():
     """
     Generate recipe suggestions based on current pantry inventory.
     Uses Claude API to intelligently suggest recipes.
+    Accepts optional preferences in POST body.
     """
+    data = request.get_json() or {}
+    preferences = data.get('preferences', {})
     pantry_items = db.get_all_items()
 
     if not pantry_items:
@@ -412,7 +415,7 @@ def suggest_recipes():
         }), 400
 
     # Get recipe suggestions from Claude
-    recipes = recipe_suggester.suggest_recipes(pantry_items)
+    recipes = recipe_suggester.suggest_recipes(pantry_items, preferences=preferences)
 
     if not recipes:
         return jsonify({
