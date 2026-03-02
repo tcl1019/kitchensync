@@ -2,7 +2,7 @@
 // Provides offline support and asset caching with cache-first strategy for static assets
 // and network-first strategy for API calls
 
-const CACHE_VERSION = 'v3';
+const CACHE_VERSION = 'v4';
 const CACHE_NAME = `pantrypal-${CACHE_VERSION}`;
 const RUNTIME_CACHE_NAME = `pantrypal-runtime-${CACHE_VERSION}`;
 const API_CACHE_NAME = `pantrypal-api-${CACHE_VERSION}`;
@@ -14,8 +14,8 @@ const STATIC_ASSETS = [
   '/static/js/app.js',
   '/static/js/pantry.js',
   '/static/js/recipes.js',
-  '/static/manifest.json',
-  '/offline.html'
+  '/static/js/grocery.js',
+  '/static/manifest.json'
 ];
 
 // Install event: cache static assets
@@ -126,7 +126,7 @@ self.addEventListener('fetch', (event) => {
         .catch(() => {
           // Fall back to cache or offline page
           return caches.match(request).then((cached) => {
-            return cached || caches.match('/offline.html');
+            return cached || createOfflineResponse();
           });
         })
     );

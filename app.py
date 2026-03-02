@@ -224,7 +224,7 @@ def import_instacart():
                      'Please check the format and try again.'
         }), 400
 
-    # Add items to database, checking for duplicates
+    # Add items to database (add_item handles duplicate accumulation)
     added_items = []
     for item_data in parsed_items:
         name = item_data.get('name', '').strip()
@@ -233,44 +233,23 @@ def import_instacart():
         if not name:
             continue
 
-        # Check if item already exists in pantry
-        existing_items = db.get_all_items()
-        existing_item = None
-        for item in existing_items:
-            if item['name'].lower() == name.lower():
-                existing_item = item
-                break
-
-        # Infer category and unit
         category = parser.infer_category(name)
         unit = infer_unit(name)
 
-        if existing_item:
-            # Update existing item quantity
-            new_quantity = existing_item['quantity'] + quantity
-            db.update_item(existing_item['id'], quantity=new_quantity)
-            added_items.append({
-                'id': existing_item['id'],
-                'name': name,
-                'quantity': new_quantity,
-                'action': 'updated'
-            })
-        else:
-            # Add new item
-            item_id = db.add_item(
-                name=name,
-                quantity=quantity,
-                unit=unit,
-                category=category,
-                added_by=user_name,
-                notes='Imported from Instacart'
-            )
-            added_items.append({
-                'id': item_id,
-                'name': name,
-                'quantity': quantity,
-                'action': 'added'
-            })
+        item_id = db.add_item(
+            name=name,
+            quantity=quantity,
+            unit=unit,
+            category=category,
+            added_by=user_name,
+            notes='Imported from Instacart'
+        )
+        added_items.append({
+            'id': item_id,
+            'name': name,
+            'quantity': quantity,
+            'action': 'added'
+        })
 
     return jsonify({
         'success': True,
@@ -294,16 +273,19 @@ def import_screenshot():
     if not file.filename:
         return jsonify({'error': 'No file selected'}), 400
 
+    # Validate file extension
+    allowed_types = {'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'png': 'image/png',
+                     'gif': 'image/gif', 'webp': 'image/webp', 'heic': 'image/heic'}
+    ext = file.filename.rsplit('.', 1)[-1].lower() if '.' in file.filename else ''
+    if ext not in allowed_types:
+        return jsonify({'error': f'Unsupported file type. Allowed: {", ".join(allowed_types)}'}), 400
+
     # Read and encode image
     image_data = file.read()
     if len(image_data) > 10 * 1024 * 1024:  # 10MB limit
         return jsonify({'error': 'Image too large (max 10MB)'}), 400
 
-    # Determine media type
-    ext = file.filename.rsplit('.', 1)[-1].lower() if '.' in file.filename else ''
-    media_types = {'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'png': 'image/png',
-                   'gif': 'image/gif', 'webp': 'image/webp', 'heic': 'image/heic'}
-    media_type = media_types.get(ext, file.content_type or 'image/jpeg')
+    media_type = allowed_types[ext]
 
     b64_image = base64.standard_b64encode(image_data).decode('utf-8')
 
@@ -375,25 +357,13 @@ If you can't identify any grocery items, return an empty array: []"""
         except (ValueError, TypeError):
             quantity = 1
 
-        # Check for existing item
-        existing_items = db.get_all_items()
-        existing_item = next(
-            (i for i in existing_items if i['name'].lower() == name.lower()), None
+        item_id = db.add_item(
+            name=name, quantity=quantity, unit=unit,
+            category=category, added_by=user_name,
+            notes='Imported from screenshot'
         )
-
-        if existing_item:
-            new_qty = existing_item['quantity'] + quantity
-            db.update_item(existing_item['id'], quantity=new_qty)
-            added_items.append({'id': existing_item['id'], 'name': name,
-                              'quantity': new_qty, 'action': 'updated'})
-        else:
-            item_id = db.add_item(
-                name=name, quantity=quantity, unit=unit,
-                category=category, added_by=user_name,
-                notes='Imported from screenshot'
-            )
-            added_items.append({'id': item_id, 'name': name,
-                              'quantity': quantity, 'action': 'added'})
+        added_items.append({'id': item_id, 'name': name,
+                          'quantity': quantity, 'action': 'added'})
 
     return jsonify({
         'success': True,

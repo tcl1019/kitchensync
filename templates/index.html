@@ -54,7 +54,8 @@
     <!-- Search -->
     <div class="search-wrapper">
         <svg class="search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-        <input type="text" id="pantry-search" placeholder="Search items...  ( / )" autocomplete="off">
+        <input type="text" id="pantry-search" placeholder="Search items..." autocomplete="off">
+        <span class="kbd search-kbd">/</span>
         <button class="search-clear hidden" id="search-clear" type="button">&times;</button>
     </div>
 
@@ -100,7 +101,7 @@
                         <span class="grid-item-name">{{ item.name }}</span>
                     </div>
                     <div class="grid-item-actions">
-                        <button class="grid-item-recipe" onclick="event.stopPropagation();quickRecipe('{{ item.name }}')" title="Find recipes">
+                        <button class="grid-item-recipe" data-ingredient="{{ item.name }}" title="Find recipes">
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
                         </button>
                         <button class="grid-item-remove" onclick="removeItem({{ item.id }})" title="Remove">

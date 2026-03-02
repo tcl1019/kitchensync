@@ -251,7 +251,14 @@ async function updateQuantity(itemId, delta) {
     if (!qtyEl) return;
 
     const currentQty = parseFloat(qtyEl.textContent) || 1;
-    const newQty = Math.max(0.5, currentQty + delta);
+    const newQty = currentQty + delta;
+
+    // Decrementing to zero removes the item
+    if (newQty <= 0) {
+        removeItem(itemId);
+        return;
+    }
+
     const display = newQty % 1 === 0 ? String(newQty) : newQty.toFixed(1);
 
     // Optimistic update
@@ -349,7 +356,7 @@ async function refreshPantryItems() {
                             <span class="grid-item-name">${escapeHtml(item.name)}</span>
                         </div>
                         <div class="grid-item-actions">
-                            <button class="grid-item-recipe" onclick="event.stopPropagation();quickRecipe('${escapeHtml(item.name).replace(/'/g, "\\'")}')" title="Find recipes">
+                            <button class="grid-item-recipe" data-ingredient="${escapeHtml(item.name)}" title="Find recipes">
                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
                             </button>
                             <button class="grid-item-remove" onclick="removeItem(${item.id})" title="Remove">
@@ -601,9 +608,7 @@ async function importScreenshots() {
             const json = await response.json();
 
             if (response.ok) {
-                // Extract count from message like "Imported 5 items from screenshot"
-                const match = (json.message || '').match(/(\d+)\s*item/);
-                if (match) totalItemsFound += parseInt(match[1]);
+                totalItemsFound += json.count || 0;
             } else {
                 showToast(`Image ${i + 1}: ${json.error || 'Failed'}`, 'error');
             }
@@ -791,6 +796,18 @@ document.addEventListener('DOMContentLoaded', () => {
     const screenshotImportBtn = document.getElementById('screenshot-import-btn');
     if (screenshotImportBtn) {
         screenshotImportBtn.addEventListener('click', importScreenshots);
+    }
+
+    // Delegate recipe button clicks (avoids inline onclick with unescaped names)
+    const pantryContainer = document.getElementById('pantry-items-container');
+    if (pantryContainer) {
+        pantryContainer.addEventListener('click', (e) => {
+            const recipeBtn = e.target.closest('.grid-item-recipe[data-ingredient]');
+            if (recipeBtn) {
+                e.stopPropagation();
+                quickRecipe(recipeBtn.dataset.ingredient);
+            }
+        });
     }
 
     // Initialize category filters from server-rendered items

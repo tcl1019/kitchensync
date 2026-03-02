@@ -334,17 +334,18 @@ IMPORTANT: Return ONLY raw JSON. No markdown, no ```json fences, no text before/
 
         lines = [
             f"\nREFERENCE RECIPES (adapt at least {must_use} from these, rest can be original):",
-            "Simplify fancy names. Set source/source_name/thumbnail from reference.\n",
+            "For adapted recipes: set source_name to the original recipe name below, copy source and thumbnail values.",
+            "For original recipes: set source='ai', source_name='', thumbnail=''.\n",
         ]
 
         for r in filtered_mealdb:
             ing_list = ", ".join(i["name"] for i in r.get("ingredients", [])[:5])
             thumb = r.get('thumbnail', '')
-            lines.append(f"- {r['name']}: {ing_list} (source='themealdb', thumbnail='{thumb}')")
+            lines.append(f"- {r['name']}: {ing_list} (source='themealdb', source_name='{r['name']}', thumbnail='{thumb}')")
 
         for r in ninjas_recipes[:2]:
             ing_list = ", ".join(i["name"] for i in r.get("ingredients", [])[:5])
-            lines.append(f"- {r['name']}: {ing_list} (source='api-ninjas')")
+            lines.append(f"- {r['name']}: {ing_list} (source='api-ninjas', source_name='{r['name']}')")
 
         return "\n".join(lines)
 
