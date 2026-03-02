@@ -382,6 +382,11 @@ function displayRecipes(recipes) {
                         ? `<span class="recipe-buy-badge">${toBuy} to buy</span>`
                         : '<span class="recipe-ready-badge">Ready to cook!</span>'}
                     ${recipe.instructions ? `<span class="recipe-meta-steps">${recipe.instructions.length} steps</span>` : ''}
+                    ${toBuy > 0
+                        ? `<button class="recipe-cart-btn" onclick="event.stopPropagation(); addMissingToGrocery(window.currentRecipes[${index}])" title="Add ${toBuy} missing to grocery list">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg>
+                           </button>`
+                        : ''}
                 </div>
                 <div class="recipe-readiness-bar">
                     <div class="readiness-fill" style="width:${readiness}%" data-pct="${readiness}"></div>
@@ -490,6 +495,25 @@ function showRecipeDetail(index) {
     const cookBtn = document.getElementById('start-cooking-btn');
     if (cookBtn) {
         cookBtn.style.display = recipe.instructions && recipe.instructions.length > 0 ? '' : 'none';
+    }
+
+    // Grocery list button in modal actions
+    const modalActions = document.querySelector('.recipe-modal-actions');
+    if (modalActions) {
+        // Remove any existing grocery button
+        const oldGrocBtn = modalActions.querySelector('.btn-add-grocery');
+        if (oldGrocBtn) oldGrocBtn.remove();
+
+        const missingCount = recipe.ingredients
+            ? recipe.ingredients.filter(i => !i.in_pantry).length
+            : 0;
+        if (missingCount > 0) {
+            const grocBtn = document.createElement('button');
+            grocBtn.className = 'btn-secondary btn-add-grocery';
+            grocBtn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg> Add ${missingCount} to Grocery List`;
+            grocBtn.onclick = () => addMissingToGrocery(window.currentRecipe);
+            modalActions.appendChild(grocBtn);
+        }
     }
 
     // Shopping list button (reset each time)

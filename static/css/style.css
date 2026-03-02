@@ -1501,6 +1501,214 @@ button { cursor: pointer; font-family: inherit; }
     font-size: 0.88rem;
 }
 
+/* ============================================================================
+   GROCERY LIST TAB
+   ============================================================================ */
+
+.grocery-items {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.grocery-item {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.7rem 1rem;
+    background: var(--bg-glass);
+    backdrop-filter: blur(var(--glass-blur)) saturate(1.2);
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.2);
+    border: 1px solid var(--bg-glass-border);
+    border-radius: var(--radius-md);
+    transition: all var(--transition-normal);
+}
+
+.grocery-item:hover {
+    background: var(--bg-hover);
+    border-color: rgba(255, 255, 255, 0.12);
+}
+
+.grocery-item-checked {
+    opacity: 0.5;
+}
+
+.grocery-item-checked .grocery-item-name {
+    text-decoration: line-through;
+    color: var(--text-tertiary);
+}
+
+/* Custom checkbox */
+.grocery-checkbox-label {
+    position: relative;
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+.grocery-checkbox {
+    position: absolute;
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.grocery-checkmark {
+    width: 20px;
+    height: 20px;
+    border: 2px solid var(--text-tertiary);
+    border-radius: var(--radius-sm);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all var(--transition-fast);
+}
+
+.grocery-checkbox:checked + .grocery-checkmark {
+    background: var(--accent-sage);
+    border-color: var(--accent-sage);
+}
+
+.grocery-checkbox:checked + .grocery-checkmark::after {
+    content: '';
+    width: 5px;
+    height: 10px;
+    border: solid #fff;
+    border-width: 0 2px 2px 0;
+    transform: rotate(45deg) translateY(-1px);
+}
+
+.grocery-checkbox:focus-visible + .grocery-checkmark {
+    outline: 2px solid var(--accent-sage);
+    outline-offset: 2px;
+}
+
+/* Item info */
+.grocery-item-info {
+    flex: 1;
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    min-width: 0;
+}
+
+.grocery-item-name {
+    font-weight: 500;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-decoration: none;
+    transition: color var(--transition-fast);
+}
+
+.grocery-item-name:hover {
+    color: var(--accent-sage);
+}
+
+.grocery-item-qty {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    white-space: nowrap;
+}
+
+.grocery-item-source {
+    font-size: 0.7rem;
+    color: var(--text-tertiary);
+    background: rgba(255, 255, 255, 0.04);
+    padding: 0.15rem 0.5rem;
+    border-radius: var(--radius-full);
+    white-space: nowrap;
+    max-width: 140px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.grocery-item-remove {
+    width: 28px;
+    height: 28px;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    border: none;
+    color: var(--text-tertiary);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transition: all var(--transition-fast);
+    flex-shrink: 0;
+}
+
+.grocery-item:hover .grocery-item-remove {
+    opacity: 1;
+}
+
+.grocery-item-remove:hover {
+    background: rgba(212, 91, 91, 0.15);
+    color: var(--danger);
+}
+
+/* Grocery action bar */
+.grocery-actions {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem 0;
+    margin-top: 0.75rem;
+    border-top: 1px solid var(--border);
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}
+
+.grocery-actions-left {
+    display: flex;
+    align-items: center;
+}
+
+.grocery-actions-right {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.grocery-summary {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
+/* Recipe card cart button */
+.recipe-cart-btn {
+    width: 28px;
+    height: 28px;
+    border-radius: var(--radius-sm);
+    background: rgba(91, 185, 140, 0.1);
+    border: 1px solid rgba(91, 185, 140, 0.2);
+    color: var(--accent-sage);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: all var(--transition-fast);
+    margin-left: 0.25rem;
+}
+
+.recipe-cart-btn:hover {
+    background: rgba(91, 185, 140, 0.2);
+    border-color: rgba(91, 185, 140, 0.4);
+    transform: translateY(-1px);
+}
+
+/* Add to Grocery button in modal */
+.btn-add-grocery {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+
 /* --- Toast Notifications --- */
 #toast-container {
     position: fixed;
@@ -2943,6 +3151,38 @@ body[data-theme="light"] .btn-cooking-nav:hover:not(:disabled) {
     background: rgba(0, 0, 0, 0.04);
 }
 
+/* Grocery list — light theme */
+body[data-theme="light"] .grocery-item {
+    background: rgba(255, 255, 255, 0.85);
+    border-color: rgba(0, 0, 0, 0.06);
+}
+
+body[data-theme="light"] .grocery-item:hover {
+    background: rgba(0, 0, 0, 0.03);
+    border-color: rgba(0, 0, 0, 0.1);
+}
+
+body[data-theme="light"] .grocery-checkmark {
+    border-color: var(--text-tertiary);
+}
+
+body[data-theme="light"] .grocery-item-source {
+    background: rgba(0, 0, 0, 0.04);
+}
+
+body[data-theme="light"] .grocery-item-remove:hover {
+    background: rgba(212, 91, 91, 0.1);
+}
+
+body[data-theme="light"] .recipe-cart-btn {
+    background: rgba(61, 155, 110, 0.08);
+    border-color: rgba(61, 155, 110, 0.2);
+}
+
+body[data-theme="light"] .recipe-cart-btn:hover {
+    background: rgba(61, 155, 110, 0.15);
+}
+
 /* ============================================================================
    Mobile responsive additions
    ============================================================================ */
@@ -2992,5 +3232,24 @@ body[data-theme="light"] .btn-cooking-nav:hover:not(:disabled) {
     .btn-history {
         width: 100%;
         justify-content: center;
+    }
+
+    /* Grocery responsive */
+    .grocery-actions {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    .grocery-actions-right {
+        flex-direction: column;
+    }
+    .grocery-actions-right button {
+        width: 100%;
+        justify-content: center;
+    }
+    .grocery-item-source {
+        display: none;
+    }
+    .grocery-item-remove {
+        opacity: 1;
     }
 }

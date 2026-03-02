@@ -193,6 +193,16 @@ function setupKeyboardShortcuts() {
             return;
         }
 
+        // "g" — switch to grocery tab
+        if (e.key === 'g') {
+            e.preventDefault();
+            const groceryTab = document.querySelector('.tab[data-tab="grocery"]');
+            if (groceryTab) groceryTab.click();
+            const groceryInput = document.getElementById('grocery-item-name');
+            if (groceryInput) groceryInput.focus();
+            return;
+        }
+
         // "n" — focus add item input
         if (e.key === 'n') {
             e.preventDefault();
