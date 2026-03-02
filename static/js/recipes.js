@@ -619,7 +619,10 @@ function showRecipeDetail(index) {
                 <li class="${cls}">
                     <strong>${escapeHtml(ing.name)}</strong>
                     ${qty ? `<span class="ingredient-qty">${qty}</span>` : ''}
-                    ${!ing.in_pantry ? `<button class="btn-quick-add" onclick="event.stopPropagation();quickAddIngredient('${escapeHtml(ing.name).replace(/'/g, "\\'")}', '${escapeHtml(ing.quantity || '1').replace(/'/g, "\\'")}', '${escapeHtml(ing.unit || '').replace(/'/g, "\\'")}', this)" title="Add to pantry">+ Add</button>` : ''}
+                    ${!ing.in_pantry ? `<span class="ingredient-add-actions">
+                        <button class="btn-quick-add btn-add-pantry" onclick="event.stopPropagation();quickAddIngredient('${escapeHtml(ing.name).replace(/'/g, "\\'")}', '${escapeHtml(ing.quantity || '1').replace(/'/g, "\\'")}', '${escapeHtml(ing.unit || '').replace(/'/g, "\\'")}', this)" title="Add to pantry">+ Pantry</button>
+                        <button class="btn-quick-add btn-add-grocery-single" onclick="event.stopPropagation();quickAddToGrocery('${escapeHtml(ing.name).replace(/'/g, "\\'")}', '${escapeHtml(ing.quantity || '').replace(/'/g, "\\'")}', '${escapeHtml(ing.unit || '').replace(/'/g, "\\'")}', this)" title="Add to grocery list">+ List</button>
+                    </span>` : ''}
                 </li>`;
         });
     }
@@ -799,15 +802,20 @@ async function quickAddIngredient(name, quantity, unit, btnEl) {
                 if (ing) ing.in_pantry = true;
             }
 
-            // Swap button for a checkmark
+            // Swap buttons for a checkmark
             if (btnEl) {
                 const li = btnEl.closest('li');
                 if (li) {
                     li.classList.remove('ingredient-to-buy');
                     li.classList.add('ingredient-in-pantry');
                 }
-                btnEl.textContent = '✓ Added';
-                btnEl.classList.add('btn-quick-added');
+                const actionsSpan = btnEl.closest('.ingredient-add-actions');
+                if (actionsSpan) {
+                    actionsSpan.innerHTML = '<span class="btn-quick-add btn-quick-added">✓ Added</span>';
+                } else {
+                    btnEl.textContent = '✓ Added';
+                    btnEl.classList.add('btn-quick-added');
+                }
             }
 
             showToast(`Added ${name} to pantry`, 'success');
@@ -818,10 +826,30 @@ async function quickAddIngredient(name, quantity, unit, btnEl) {
     } catch (error) {
         if (btnEl) {
             btnEl.disabled = false;
-            btnEl.textContent = '+ Add';
+            btnEl.textContent = '+ Pantry';
         }
         showToast('Failed to add item', 'error');
     }
+}
+
+function quickAddToGrocery(name, quantity, unit, btnEl) {
+    if (typeof addGroceryItem !== 'function') {
+        showToast('Grocery list not available', 'error');
+        return;
+    }
+
+    const recipeName = window.currentRecipe ? window.currentRecipe.name : '';
+    addGroceryItem(name, quantity, unit, recipeName);
+
+    if (btnEl) {
+        const actionsSpan = btnEl.closest('.ingredient-add-actions');
+        if (actionsSpan) {
+            actionsSpan.innerHTML = '<span class="btn-quick-add btn-quick-added">✓ Listed</span>';
+        }
+    }
+
+    showToast(`Added ${name} to grocery list`, 'success');
+    if (typeof updateGroceryBadge === 'function') updateGroceryBadge();
 }
 
 // ============================================================================

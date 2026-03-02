@@ -1531,6 +1531,30 @@ button { cursor: pointer; font-family: inherit; }
     color: var(--accent-sage);
     background: rgba(var(--accent-sage-rgb, 161,184,156), 0.2);
     border-color: var(--accent-sage);
+    cursor: default;
+    pointer-events: none;
+}
+
+.ingredient-add-actions {
+    display: inline-flex;
+    gap: 0.3rem;
+    margin-left: 0.4rem;
+    vertical-align: middle;
+}
+
+.btn-add-pantry {
+    margin-left: 0;
+}
+
+.btn-add-grocery-single {
+    margin-left: 0;
+    color: var(--accent-terracotta-light, #c17b5a);
+    background: rgba(193, 123, 90, 0.12);
+    border-color: rgba(193, 123, 90, 0.3);
+}
+
+.btn-add-grocery-single:hover {
+    background: rgba(193, 123, 90, 0.25);
 }
 
 .instructions-list {
@@ -3006,6 +3030,16 @@ body[data-theme="light"] .btn-quick-added {
     color: #3a7d44;
     background: rgba(58, 125, 68, 0.15);
     border-color: #3a7d44;
+}
+
+body[data-theme="light"] .btn-add-grocery-single {
+    color: #a0522d;
+    background: rgba(160, 82, 45, 0.08);
+    border-color: rgba(160, 82, 45, 0.25);
+}
+
+body[data-theme="light"] .btn-add-grocery-single:hover {
+    background: rgba(160, 82, 45, 0.15);
 }
 
 /* Favorite button in modal */
