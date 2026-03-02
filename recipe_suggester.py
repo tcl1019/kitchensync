@@ -68,25 +68,37 @@ class RecipeSuggester:
 
         prompt = f"""You are a practical home cook, not a fancy chef. Given this pantry, suggest {count} realistic meals or snacks.
 
+ASSUMED KITCHEN STAPLES (do NOT list these as "to buy" — assume every kitchen has them):
+Salt, black pepper, olive oil, vegetable oil, butter, garlic powder, onion powder, paprika,
+cumin, chili powder, oregano, Italian seasoning, soy sauce, vinegar, flour, sugar, baking
+powder, ketchup, mustard, mayo. Mark these as in_pantry: true when used.
+
 RULES:
 - Each recipe is ONE dish, not a dish + random side.
 - Suggest normal meals real people actually cook and search for online: stir fry, pasta, tacos, fried rice, quesadillas, soup, sandwiches, wraps, salads, etc.
-- Use 3-4 pantry items per recipe. You do NOT need to use every item — and you SHOULD NOT force weird combos just to use more items.
+- Use 2-5 pantry items per recipe. You do NOT need to use every item — and you SHOULD NOT force weird combos just to use more items.
 - Prioritize perishables (meat, dairy, produce) over shelf-stable stuff
 - Under 30 min active cooking
-- 0-2 extra ingredients to buy (basic spices don't count)
+- 0-2 extra ingredients to buy (staples above don't count)
 - Simple names only: "Turkey Tacos" not "Seasoned Ground Turkey Fiesta Wraps"
 - Include a MIX of meal types: some full meals, some quick snacks, some sides — unless the user specifies otherwise
 - For snacks: can be as simple as 1-2 ingredients (e.g. "Apple & Peanut Butter", "Cheese Plate")
 
-FLAVOR SANITY CHECK — CRITICAL:
-- ONLY suggest ingredient combinations that are well-established in real cooking. If you wouldn't find it on a normal recipe blog, don't suggest it.
-- NEVER combine sweet fruits (banana, clementine, mango, berries) with cured/savory meats (bacon, sausage, ham) UNLESS it's a widely known pairing (e.g. prosciutto + melon, pork + apple, Hawaiian pizza).
-- NEVER invent bizarre fusion dishes. "Bacon Wrapped Banana" is NOT a real recipe people make. Neither is "Bacon & Clementines."
-- Ask yourself: "Would a normal person see this recipe name and think 'yeah that sounds good'?" If the answer is no, don't suggest it.
-- When in doubt, stick to classic comfort food and simple staples. Boring but tasty beats creative but disgusting.
+RECIPE COMPLETENESS — CRITICAL:
+- Instructions must be DETAILED and COMPLETE. A real person should be able to cook the dish from your instructions alone.
+- Each step should include specific temperatures, times, and techniques. NOT just "Cook the chicken" — instead "Heat olive oil in a large skillet over medium-high heat. Season chicken thighs with salt, pepper, and paprika. Cook 5-6 minutes per side until golden brown and internal temp reaches 165°F."
+- Include 5-8 steps for main dishes. 3-5 steps for simple snacks/sides.
+- Include prep steps (chopping, seasoning) and finishing steps (garnish, rest, plate).
+
+FLAVOR SANITY CHECK — CRITICAL (violations will be rejected):
+- ONLY suggest recipes you could find on AllRecipes, Tasty, or a normal food blog.
+- ABSOLUTELY NEVER combine: bacon + banana, bacon + clementine, bacon + mango, sausage + fruit, meat + sweet fruit.
+- The ONLY acceptable meat + fruit pairings are: pork + apple, prosciutto + melon, chicken + cranberry, ham + pineapple.
+- Do NOT wrap random things in bacon. "Bacon Wrapped Turkey" is not a home recipe. Use bacon in sandwiches, pasta, eggs, salads, burgers, or soups.
+- Every recipe must pass this test: "Could I google this recipe name and find it on a real cooking website?" If no, don't suggest it.
+- When the pantry has incompatible items (e.g. bacon AND bananas), use them in SEPARATE recipes, not together.
 {pref_lines}{user_prompt_section}{grounding_section}
-PANTRY INVENTORY:
+PANTRY INVENTORY (all items below are in_pantry: true — do NOT list them as "to buy"):
 {inventory_text}
 
 Return valid JSON only (no markdown, no code fences, no explanation):
@@ -106,7 +118,7 @@ Return valid JSON only (no markdown, no code fences, no explanation):
         {{"name": "ingredient", "quantity": "amount", "unit": "unit", "in_pantry": true}},
         {{"name": "ingredient", "quantity": "amount", "unit": "unit", "in_pantry": false}}
       ],
-      "instructions": ["Step 1", "Step 2", "Step 3"]
+      "instructions": ["Detailed step 1 with temps/times", "Detailed step 2", "...5-8 steps for mains"]
     }}
   ]
 }}"""
@@ -114,7 +126,7 @@ Return valid JSON only (no markdown, no code fences, no explanation):
         try:
             message = self.client.messages.create(
                 model="claude-sonnet-4-5-20250929",
-                max_tokens=3000,
+                max_tokens=4500,
                 messages=[
                     {"role": "user", "content": prompt}
                 ]
@@ -169,10 +181,11 @@ Return valid JSON only (no markdown, no code fences, no explanation):
             return ""
 
         lines = [
-            "\nREFERENCE RECIPES (real recipes from a database — adapt these or use as inspiration):",
-            "If you base a recipe on one of these, keep the original name, set source to 'themealdb',",
+            "\nREFERENCE RECIPES (real recipes from TheMealDB — STRONGLY prefer these over making up recipes):",
+            f"You MUST use at least {min(len(grounding_recipes), 3)} of these as the basis for your suggestions.",
+            "Adapt them to use pantry items where possible. Keep the original name, set source to 'themealdb',",
             "set source_name to the original recipe name, and include the thumbnail URL.",
-            "You may also create original recipes (set source to 'ai').\n",
+            "Fill in any remaining slots with original recipes (set source to 'ai').\n",
         ]
 
         for r in grounding_recipes:
@@ -214,21 +227,50 @@ Return valid JSON only (no markdown, no code fences, no explanation):
             return "\nPREFERENCES:\n" + "\n".join(lines) + "\n"
         return ""
 
+    def _simplify_name(self, name: str) -> str:
+        """Simplify long grocery store names for the Claude prompt.
+        e.g. 'Greenfield Natural Meat Co. Applewood Smoked Uncured Bacon' → 'Applewood Smoked Bacon'
+        e.g. 'Kroger® 85/15 Fresh Ground Turkey Tray 1 LB' → 'Ground Turkey'
+        """
+        import re
+        # Remove brand prefixes and suffixes
+        s = name
+        # Remove common brand patterns: "Brand® ...", "Brand's® ..."
+        s = re.sub(r'^[\w\s\.&\']+®\s*', '', s)
+        # Remove size/weight suffixes like "1 LB", "16 oz", "Tray", "Bag"
+        s = re.sub(r'\b\d+(\.\d+)?\s*(LB|lb|oz|OZ|ct|CT|pk|PK|gal|GAL|ml|ML|L)\b', '', s)
+        s = re.sub(r'\b(Tray|Bag|Box|Can|Pack|Bundle|Pouch|Bottle|Jug)\b', '', s, flags=re.IGNORECASE)
+        # Remove "Brand Name" prefixes (words before the food)
+        # Common brand indicators
+        brand_words = ['kroger', 'roundy', 'greenfield', 'natural', 'meat', 'co.', 'co',
+                       'simply', 'birds', 'eye', 'voila!', 'voila', 'wow', 'bao', 'celsius',
+                       'heineken', 'carnation', 'old', 'fashioned', 'select', 'sara', 'lee',
+                       'sunsweet', 'dole', 'del', 'monte', 'great', 'value']
+        words = s.split()
+        # Strip leading brand words
+        while words and words[0].lower().rstrip('®.,') in brand_words:
+            words.pop(0)
+        s = ' '.join(words).strip()
+        # Remove trailing commas, clean up whitespace
+        s = re.sub(r'\s+', ' ', s).strip().rstrip(',')
+        return s if len(s) > 2 else name
+
     def _format_inventory(self, items: List[Dict]) -> str:
-        """Format pantry items for Claude prompt."""
+        """Format pantry items for Claude prompt with simplified names."""
         if not items:
             return "Empty pantry"
 
         lines = []
         for item in items:
             name = item.get('name', 'Unknown')
+            simple = self._simplify_name(name)
             qty = item.get('quantity', 1)
             unit = item.get('unit', '')
 
             if unit:
-                lines.append(f"- {name}: {qty} {unit}")
+                lines.append(f"- {simple}: {qty} {unit}")
             else:
-                lines.append(f"- {name}: {qty}")
+                lines.append(f"- {simple}: {qty}")
 
         return '\n'.join(lines)
 

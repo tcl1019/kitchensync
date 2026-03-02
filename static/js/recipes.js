@@ -463,13 +463,14 @@ function showRecipeDetail(index) {
     const ingredientsList = document.getElementById('recipe-ingredients');
     let ingredientsHtml = '';
     if (recipe.ingredients) {
-        recipe.ingredients.forEach(ing => {
+        recipe.ingredients.forEach((ing, ingIdx) => {
             const cls = ing.in_pantry ? 'ingredient-in-pantry' : 'ingredient-to-buy';
             const qty = ing.quantity && ing.unit ? `${ing.quantity} ${ing.unit}` : (ing.quantity || '');
             ingredientsHtml += `
                 <li class="${cls}">
                     <strong>${escapeHtml(ing.name)}</strong>
                     ${qty ? `<span class="ingredient-qty">${qty}</span>` : ''}
+                    ${!ing.in_pantry ? `<button class="btn-quick-add" onclick="event.stopPropagation();quickAddIngredient('${escapeHtml(ing.name).replace(/'/g, "\\'")}', '${escapeHtml(ing.quantity || '1').replace(/'/g, "\\'")}', '${escapeHtml(ing.unit || '').replace(/'/g, "\\'")}', this)" title="Add to pantry">+ Add</button>` : ''}
                 </li>`;
         });
     }
@@ -601,6 +602,57 @@ async function generateShoppingList(recipe) {
             retryBtn.disabled = false;
             retryBtn.textContent = 'Generate Shopping List';
         }
+    }
+}
+
+// ============================================================================
+// Quick Add Missing Ingredient to Pantry
+// ============================================================================
+
+async function quickAddIngredient(name, quantity, unit, btnEl) {
+    // Disable button immediately
+    if (btnEl) {
+        btnEl.disabled = true;
+        btnEl.textContent = 'Adding...';
+    }
+
+    try {
+        const result = await apiCall('POST', '/api/add-item', {
+            name: name,
+            quantity: parseFloat(quantity) || 1,
+            unit: unit || '',
+            category: 'Other',
+        });
+
+        if (result.success) {
+            // Update the ingredient in current recipe data
+            if (window.currentRecipe && window.currentRecipe.ingredients) {
+                const ing = window.currentRecipe.ingredients.find(i => i.name === name);
+                if (ing) ing.in_pantry = true;
+            }
+
+            // Swap button for a checkmark
+            if (btnEl) {
+                const li = btnEl.closest('li');
+                if (li) {
+                    li.classList.remove('ingredient-to-buy');
+                    li.classList.add('ingredient-in-pantry');
+                }
+                btnEl.textContent = '✓ Added';
+                btnEl.classList.add('btn-quick-added');
+            }
+
+            showToast(`Added ${name} to pantry`, 'success');
+
+            // Refresh pantry count in tab badge
+            if (typeof refreshPantryItems === 'function') refreshPantryItems();
+        }
+    } catch (error) {
+        if (btnEl) {
+            btnEl.disabled = false;
+            btnEl.textContent = '+ Add';
+        }
+        showToast('Failed to add item', 'error');
     }
 }
 
