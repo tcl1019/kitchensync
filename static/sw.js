@@ -2,7 +2,7 @@
 // Provides offline support and asset caching with cache-first strategy for static assets
 // and network-first strategy for API calls
 
-const CACHE_VERSION = 'v1';
+const CACHE_VERSION = 'v2';
 const CACHE_NAME = `pantrypal-${CACHE_VERSION}`;
 const RUNTIME_CACHE_NAME = `pantrypal-runtime-${CACHE_VERSION}`;
 const API_CACHE_NAME = `pantrypal-api-${CACHE_VERSION}`;

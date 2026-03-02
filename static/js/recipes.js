@@ -16,6 +16,8 @@ function escapeHtml(text) {
 
 let selectedTags = [];
 let selectedMealType = 'all';
+let recipeMode = 'pantry'; // 'pantry' or 'discover'
+let recipeSortOrder = 'best'; // 'best', 'quickest', 'name'
 
 // ============================================================================
 // Recipe Accumulation State
@@ -61,6 +63,15 @@ function setupPreferenceChips() {
             document.querySelectorAll('#pref-meal-types .pref-meal-type').forEach(p => p.classList.remove('active'));
             pill.classList.add('active');
             selectedMealType = pill.dataset.meal;
+        });
+    });
+
+    // Mode toggle (pantry vs discover)
+    document.querySelectorAll('#recipe-mode-toggle .mode-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('#recipe-mode-toggle .mode-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            recipeMode = btn.dataset.mode;
         });
     });
 }
@@ -304,7 +315,8 @@ async function suggestRecipes() {
     try {
         const result = await apiCall('POST', '/api/suggest-recipes', {
             preferences,
-            prompt: prompt || undefined
+            prompt: prompt || undefined,
+            mode: recipeMode
         });
         // Accumulate: prepend new generation, cap at MAX
         window.allRecipeGenerations.unshift({
@@ -389,9 +401,12 @@ function buildRecipeCardHTML(recipe, index, genIdx) {
     const source = recipe.source || 'ai';
     const sourceName = recipe.source_name || '';
     const thumbnail = recipe.thumbnail || '';
+    const cookMins = parseInt((cookTime.match(/(\d+)/) || [])[1]) || 999;
+    const readinessLevel = readiness >= 80 ? 'high' : readiness >= 40 ? 'medium' : 'low';
 
     return `
-        <div class="recipe-card" onclick="showRecipeFromGen(${genIdx}, ${index})" data-readiness="${readiness}" data-name="${escapeHtml(recipe.name)}" style="animation-delay: ${index * 0.06}s">
+        <div class="recipe-card" onclick="showRecipeFromGen(${genIdx}, ${index})" data-readiness="${readiness}" data-cooktime="${cookMins}" data-name="${escapeHtml(recipe.name)}" style="animation-delay: ${index * 0.06}s">
+            <span class="readiness-badge ${readinessLevel}">${readiness}%</span>
             ${thumbnail ? `<img class="recipe-card-thumb" src="${escapeHtml(thumbnail)}" alt="${escapeHtml(recipe.name)}" loading="lazy">` : ''}
             <button class="recipe-fav-btn ${isFav ? 'active' : ''}" onclick="event.stopPropagation(); toggleFavoriteFromGen(${genIdx}, ${index})" title="${isFav ? 'Remove from favorites' : 'Save recipe'}">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
@@ -473,8 +488,13 @@ function displayAllGenerations() {
         </div>
         <div class="recipe-filter-bar" id="recipe-filter-bar">
             <button class="recipe-filter active" data-filter="all" onclick="filterRecipeCards('all')">All</button>
-            <button class="recipe-filter" data-filter="ready" onclick="filterRecipeCards('ready')">Ready to Cook</button>
+            <button class="recipe-filter" data-filter="ready" onclick="filterRecipeCards('ready')">100% Ready</button>
             <button class="recipe-filter" data-filter="saved" onclick="filterRecipeCards('saved')">Saved</button>
+            <select class="recipe-sort-select" onchange="sortRecipeCards(this.value)">
+                <option value="best" ${recipeSortOrder === 'best' ? 'selected' : ''}>Best Match</option>
+                <option value="quickest" ${recipeSortOrder === 'quickest' ? 'selected' : ''}>Quickest</option>
+                <option value="name" ${recipeSortOrder === 'name' ? 'selected' : ''}>A → Z</option>
+            </select>
         </div>`;
 
     gens.forEach((gen, genIdx) => {
@@ -536,6 +556,24 @@ function filterRecipeCards(filter) {
         const groupCards = group.querySelectorAll('.recipe-card');
         const anyVisible = Array.from(groupCards).some(c => c.style.display !== 'none');
         group.style.display = anyVisible ? '' : 'none';
+    });
+}
+
+function sortRecipeCards(sortBy) {
+    recipeSortOrder = sortBy;
+    // Sort cards within each .recipe-grid
+    document.querySelectorAll('#recipes-container .recipe-grid').forEach(grid => {
+        const cards = Array.from(grid.querySelectorAll('.recipe-card'));
+        cards.sort((a, b) => {
+            if (sortBy === 'best') {
+                return parseInt(b.dataset.readiness) - parseInt(a.dataset.readiness);
+            } else if (sortBy === 'quickest') {
+                return parseInt(a.dataset.cooktime) - parseInt(b.dataset.cooktime);
+            } else {
+                return (a.dataset.name || '').localeCompare(b.dataset.name || '');
+            }
+        });
+        cards.forEach(card => grid.appendChild(card));
     });
 }
 

@@ -25,7 +25,8 @@ class RecipeSuggester:
 
     def suggest_recipes(self, pantry_items: List[Dict],
                         preferences: Optional[Dict] = None,
-                        user_prompt: Optional[str] = None) -> List[Dict]:
+                        user_prompt: Optional[str] = None,
+                        mode: str = 'pantry') -> List[Dict]:
         """
         Suggest recipes based on available pantry items and user preferences.
 
@@ -37,12 +38,13 @@ class RecipeSuggester:
                 - max_cook_time: int in minutes
                 - count: int number of recipes to generate
             user_prompt: Optional free-text describing what the user wants
+            mode: 'pantry' (build from pantry) or 'discover' (popular recipes, pantry optional)
 
         Returns:
             List of recipe dicts with name, description, meal_type, cook_time,
             difficulty, tags, ingredients, instructions, source, source_name, thumbnail
         """
-        if not pantry_items:
+        if not pantry_items and mode == 'pantry':
             return []
 
         # Check if API key is available
@@ -52,7 +54,7 @@ class RecipeSuggester:
         preferences = preferences or {}
 
         # Format pantry inventory for Claude
-        inventory_text = self._format_inventory(pantry_items)
+        inventory_text = self._format_inventory(pantry_items) if pantry_items else ""
 
         # Build preference instructions
         pref_lines = self._build_preference_instructions(preferences)
@@ -60,21 +62,37 @@ class RecipeSuggester:
         # Build user prompt section
         user_prompt_section = ""
         if user_prompt:
-            user_prompt_section = f"\nUSER REQUEST: {user_prompt}\nHonor this request while using pantry items where possible.\n"
+            if mode == 'discover':
+                user_prompt_section = f"\nUSER REQUEST: {user_prompt}\nHonor this request — suggest great recipes regardless of pantry.\n"
+            else:
+                user_prompt_section = f"\nUSER REQUEST: {user_prompt}\nHonor this request while using pantry items where possible.\n"
 
         # Fetch grounding recipes from APIs
-        grounding_section = self._build_grounding_section(pantry_items)
+        grounding_section = self._build_grounding_section(pantry_items) if pantry_items else ""
 
         count = preferences.get('count', self.max_suggestions)
 
-        prompt = f"""You are a confident, flavor-forward home cook who makes restaurant-quality food without fuss. Given this pantry, suggest {count} realistic meals or snacks.
-
-ASSUMED KITCHEN STAPLES (do NOT list these as "to buy" — assume every kitchen has them):
-Salt, black pepper, olive oil, vegetable oil, butter, garlic powder, onion powder, paprika,
-cumin, chili powder, oregano, Italian seasoning, soy sauce, vinegar, flour, sugar, baking
-powder, ketchup, mustard, mayo. Mark these as in_pantry: true when used.
-
-RULES:
+        # Build mode-specific prompt sections
+        if mode == 'discover':
+            intro_line = f"You are a confident, flavor-forward home cook who makes restaurant-quality food without fuss. Suggest {count} popular, crave-worthy recipes that real people love to cook at home."
+            rules_block = """RULES:
+- Each recipe is ONE dish, not a dish + random side.
+- Suggest popular meals real people actually cook and search for online: stir fry, pasta, tacos, fried rice, quesadillas, soup, sandwiches, wraps, salads, stews, curries, etc.
+- Recipes should be crowd-pleasers — think AllRecipes top-rated, Tasty viral, or food blog favorites.
+- Under 45 min active cooking preferred, up to 60 min OK for special dishes.
+- Simple names only: "Chicken Tikka Masala" not "Aromatic Spiced Yogurt-Marinated Chicken Masala"
+- Include a MIX of meal types: some full meals, some quick snacks, some sides — unless the user specifies otherwise
+- For snacks: can be as simple as 1-2 ingredients (e.g. "Apple & Peanut Butter", "Cheese Plate")"""
+            if inventory_text:
+                pantry_block = f"""
+PANTRY REFERENCE (the user has these items — mark matching ingredients as in_pantry: true):
+{inventory_text}
+For ingredients NOT in the pantry above, set in_pantry: false. The user will add them to their grocery list."""
+            else:
+                pantry_block = "\nThe user has no pantry items. Mark ALL ingredients as in_pantry: false."
+        else:
+            intro_line = f"You are a confident, flavor-forward home cook who makes restaurant-quality food without fuss. Given this pantry, suggest {count} realistic meals or snacks."
+            rules_block = """RULES:
 - Each recipe is ONE dish, not a dish + random side.
 - Suggest normal meals real people actually cook and search for online: stir fry, pasta, tacos, fried rice, quesadillas, soup, sandwiches, wraps, salads, etc.
 - Use 2-5 pantry items per recipe. You do NOT need to use every item — and you SHOULD NOT force weird combos just to use more items.
@@ -83,7 +101,19 @@ RULES:
 - 0-2 extra ingredients to buy (staples above don't count)
 - Simple names only: "Turkey Tacos" not "Seasoned Ground Turkey Fiesta Wraps"
 - Include a MIX of meal types: some full meals, some quick snacks, some sides — unless the user specifies otherwise
-- For snacks: can be as simple as 1-2 ingredients (e.g. "Apple & Peanut Butter", "Cheese Plate")
+- For snacks: can be as simple as 1-2 ingredients (e.g. "Apple & Peanut Butter", "Cheese Plate")"""
+            pantry_block = f"""
+PANTRY INVENTORY (all items below are in_pantry: true — do NOT list them as "to buy"):
+{inventory_text}"""
+
+        prompt = f"""{intro_line}
+
+ASSUMED KITCHEN STAPLES (do NOT list these as "to buy" — assume every kitchen has them):
+Salt, black pepper, olive oil, vegetable oil, butter, garlic powder, onion powder, paprika,
+cumin, chili powder, oregano, Italian seasoning, soy sauce, vinegar, flour, sugar, baking
+powder, ketchup, mustard, mayo. Mark these as in_pantry: true when used.
+
+{rules_block}
 
 RECIPE COMPLETENESS — CRITICAL:
 - Instructions must be DETAILED and COMPLETE. A real person should be able to cook the dish from your instructions alone.
@@ -107,9 +137,7 @@ FLAVOR SANITY CHECK — CRITICAL (violations will be rejected):
 - Do NOT wrap random things in bacon. "Bacon Wrapped Turkey" is not a home recipe. Use bacon in sandwiches, pasta, eggs, salads, burgers, or soups.
 - Every recipe must pass this test: "Could I google this recipe name and find it on a real cooking website?" If no, don't suggest it.
 - When the pantry has incompatible items (e.g. bacon AND bananas), use them in SEPARATE recipes, not together.
-{pref_lines}{user_prompt_section}{grounding_section}
-PANTRY INVENTORY (all items below are in_pantry: true — do NOT list them as "to buy"):
-{inventory_text}
+{pref_lines}{user_prompt_section}{grounding_section}{pantry_block}
 
 Return valid JSON only (no markdown, no code fences, no explanation):
 {{

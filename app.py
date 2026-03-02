@@ -414,16 +414,17 @@ def suggest_recipes():
     data = request.get_json() or {}
     preferences = data.get('preferences', {})
     user_prompt = (data.get('prompt', '') or '').strip() or None
+    mode = data.get('mode', 'pantry')  # 'pantry' or 'discover'
     pantry_items = db.get_all_items()
 
-    if not pantry_items:
+    if not pantry_items and mode == 'pantry':
         return jsonify({
-            'error': 'Your pantry is empty. Add some items first to get recipe suggestions.'
+            'error': 'Your pantry is empty. Add some items first or try "Discover New" mode.'
         }), 400
 
     # Get recipe suggestions from Claude (with optional user prompt and MealDB grounding)
     recipes = recipe_suggester.suggest_recipes(
-        pantry_items, preferences=preferences, user_prompt=user_prompt
+        pantry_items, preferences=preferences, user_prompt=user_prompt, mode=mode
     )
 
     if not recipes:

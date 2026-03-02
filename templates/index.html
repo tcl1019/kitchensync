@@ -162,6 +162,12 @@
         <span class="recipe-prompt-hint">Optional — or just hit Generate</span>
     </div>
 
+    <!-- Mode Toggle -->
+    <div class="recipe-mode-toggle" id="recipe-mode-toggle">
+        <button class="mode-btn active" data-mode="pantry">🏠 Use My Pantry</button>
+        <button class="mode-btn" data-mode="discover">🌍 Discover New</button>
+    </div>
+
     <!-- Action Row -->
     <div class="recipe-action-row">
         <button id="suggest-btn" class="btn-primary btn-large">
@@ -364,9 +370,9 @@
 {% endblock %}
 
 {% block extra_js %}
-<script src="{{ url_for('static', filename='js/pantry.js') }}"></script>
-<script src="{{ url_for('static', filename='js/recipes.js') }}"></script>
-<script src="{{ url_for('static', filename='js/grocery.js') }}"></script>
+<script src="{{ url_for('static', filename='js/pantry.js') }}?v=2"></script>
+<script src="{{ url_for('static', filename='js/recipes.js') }}?v=2"></script>
+<script src="{{ url_for('static', filename='js/grocery.js') }}?v=2"></script>
 {% if shared_text %}
 <script>
     // Auto-open import modal with shared text pre-filled
