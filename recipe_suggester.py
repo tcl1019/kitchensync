@@ -70,7 +70,7 @@ class RecipeSuggester:
         # Fetch grounding recipes from APIs
         grounding_section = self._build_grounding_section(pantry_items) if pantry_items else ""
 
-        count = preferences.get('count', self.max_suggestions)
+        count = min(preferences.get('count', self.max_suggestions), 4)
 
         # Build mode-specific prompt sections
         if mode == 'discover':
@@ -115,57 +115,35 @@ powder, ketchup, mustard, mayo. Mark these as in_pantry: true when used.
 
 {rules_block}
 
-RECIPE COMPLETENESS — CRITICAL:
-- Instructions must be DETAILED and COMPLETE. A real person should be able to cook the dish from your instructions alone.
-- Each step should include specific temperatures, times, and techniques. NOT just "Cook the chicken" — instead "Heat olive oil in a large skillet over medium-high heat. Season chicken thighs with salt, pepper, and paprika. Cook 5-6 minutes per side until golden brown and internal temp reaches 165°F."
-- Include 5-8 steps for main dishes. 3-5 steps for simple snacks/sides.
-- Include prep steps (chopping, seasoning) and finishing steps (garnish, rest, plate).
+RECIPE INSTRUCTIONS — keep them concise but complete:
+- 4-6 steps for mains, 2-4 for snacks/sides. Combine related actions into single steps.
+- Include key temps and times but don't over-explain basic techniques.
+- Keep each step to 1-2 sentences max.
+- Use 6-10 ingredients per main dish. Keep it simple.
 
-FLAVOR EXCELLENCE — make every recipe crave-worthy:
-- Brown and sear meats HARD. Use the fond — deglaze the pan with broth, wine, or vinegar.
-- Season at EVERY stage: salt the pasta water, season before searing, adjust at the end.
-- Finish dishes with acid: a squeeze of lemon, splash of vinegar, or dollop of sour cream brightens everything.
-- Use aromatics aggressively: garlic, ginger, shallots, fresh herbs are the backbone of flavor.
-- Specify exact spice combos, not just "add spices." Example: "1 tsp smoked paprika, 1/2 tsp cumin, pinch of cayenne."
-- Toast dry spices in oil before adding liquid — this blooms their flavor.
-- Think: "Would this recipe get 4+ stars on AllRecipes?" If the flavor profile is bland, fix it.
-
-FLAVOR SANITY CHECK — CRITICAL (violations will be rejected):
-- ONLY suggest recipes you could find on AllRecipes, Tasty, or a normal food blog.
-- ABSOLUTELY NEVER combine: bacon + banana, bacon + clementine, bacon + mango, sausage + fruit, meat + sweet fruit.
-- The ONLY acceptable meat + fruit pairings are: pork + apple, prosciutto + melon, chicken + cranberry, ham + pineapple.
-- Do NOT wrap random things in bacon. "Bacon Wrapped Turkey" is not a home recipe. Use bacon in sandwiches, pasta, eggs, salads, burgers, or soups.
-- Every recipe must pass this test: "Could I google this recipe name and find it on a real cooking website?" If no, don't suggest it.
-- When the pantry has incompatible items (e.g. bacon AND bananas), use them in SEPARATE recipes, not together.
+FLAVOR RULES:
+- Brown meats well, deglaze pans, season at every stage, finish with acid.
+- Specify exact spice amounts. Toast spices in oil.
+- Only suggest recipes you'd find on AllRecipes or Tasty — no weird combos.
+- Never combine meat + sweet fruit except: pork+apple, prosciutto+melon, chicken+cranberry, ham+pineapple.
+- When pantry has incompatible items, use them in SEPARATE recipes.
 {pref_lines}{user_prompt_section}{grounding_section}{pantry_block}
 
-Return valid JSON only (no markdown, no code fences, no explanation):
-{{
-  "recipes": [
-    {{
-      "name": "Simple recipe name",
-      "description": "1 sentence — what it is and why it works with this pantry",
-      "meal_type": "main|snack|side|breakfast",
-      "cook_time": "10 min",
-      "difficulty": "easy|medium|hard",
-      "tags": ["low-carb", "quick"],
-      "source": "themealdb or api-ninjas or ai",
-      "source_name": "Original recipe name if adapted from a reference, otherwise empty string",
-      "thumbnail": "thumbnail URL if from a reference recipe, otherwise empty string",
-      "ingredients": [
-        {{"name": "ingredient", "quantity": "amount", "unit": "unit", "in_pantry": true}},
-        {{"name": "ingredient", "quantity": "amount", "unit": "unit", "in_pantry": false}}
-      ],
-      "instructions": ["Detailed step 1 with temps/times", "Detailed step 2", "...5-8 steps for mains"]
-    }}
-  ]
-}}"""
+IMPORTANT: Return ONLY raw JSON. No markdown, no ```json fences, no text before/after.
+{{"recipes": [
+  {{"name": "Short Name", "description": "1 sentence", "meal_type": "main|snack|side|breakfast",
+    "cook_time": "10 min", "difficulty": "easy|medium|hard", "tags": ["quick"],
+    "source": "ai", "source_name": "", "thumbnail": "",
+    "ingredients": [{{"name": "x", "quantity": "1", "unit": "cup", "in_pantry": true}}],
+    "instructions": ["Step 1 with temps/times.", "Step 2.", "Step 3."]}}
+]}}"""
 
         try:
             message = self.client.messages.create(
                 model="claude-haiku-4-5-20251001",
-                max_tokens=10000,
+                max_tokens=8000,
                 timeout=45.0,
+                system="You are a recipe JSON generator. Return ONLY valid raw JSON — never use markdown code fences, never include text outside the JSON object. Be concise in instructions: 1-2 sentences per step.",
                 messages=[
                     {"role": "user", "content": prompt}
                 ]
@@ -177,28 +155,29 @@ Return valid JSON only (no markdown, no code fences, no explanation):
             if message.stop_reason == 'max_tokens':
                 print(f"Warning: response truncated (stop_reason=max_tokens)")
 
-            # Strip markdown code fences if present
+            # Strip markdown code fences if present (handles truncated responses
+            # where closing ``` may be missing)
             cleaned = response_text.strip()
-            fence_match = re.match(r'^```\w*\s*\n(.*?)```\s*$', cleaned, re.DOTALL)
-            if fence_match:
-                cleaned = fence_match.group(1).strip()
-            else:
+            if cleaned.startswith('```'):
+                # Remove opening fence line (e.g. "```json\n")
+                first_newline = cleaned.find('\n')
+                if first_newline != -1:
+                    cleaned = cleaned[first_newline + 1:]
+                # Remove closing fence if present
+                if cleaned.rstrip().endswith('```'):
+                    cleaned = cleaned.rstrip()[:-3]
                 cleaned = cleaned.strip()
 
             # Parse JSON response
             try:
                 data = json.loads(cleaned)
             except json.JSONDecodeError as e:
-                if message.stop_reason == 'max_tokens':
-                    # Response was truncated — try to salvage complete recipes
-                    print(f"JSON truncated, attempting repair: {e}")
-                    data = self._repair_truncated_json(cleaned)
-                    if not data:
-                        print(f"Could not repair truncated JSON")
-                        return []
-                else:
-                    print(f"JSON parsing error: {e}")
-                    print(f"Response: {response_text}")
+                # Always attempt repair — response may be truncated by
+                # max_tokens, timeout, or other reasons
+                print(f"JSON parse failed ({message.stop_reason}), attempting repair: {e}")
+                data = self._repair_truncated_json(cleaned)
+                if not data:
+                    print(f"Could not repair JSON. First 200 chars: {cleaned[:200]}")
                     return []
 
             recipes = data.get('recipes', [])
@@ -224,26 +203,65 @@ Return valid JSON only (no markdown, no code fences, no explanation):
     def _repair_truncated_json(self, text: str) -> Optional[Dict]:
         """Attempt to salvage complete recipes from a truncated JSON response.
 
-        When max_tokens is hit, the JSON is cut off mid-way. This method finds
-        the last complete recipe object and returns a valid dict with those recipes.
+        When the response is cut off, the JSON is incomplete. This method walks
+        through the recipes array tracking brace depth to find complete recipe
+        objects, skipping the final truncated one.
         """
-        # Find all complete recipe objects by looking for the pattern between
-        # opening { with "name" and the next }, accounting for nested braces
+        # Find the start of the recipes array
+        arr_match = re.search(r'"recipes"\s*:\s*\[', text)
+        if not arr_match:
+            return None
+
+        pos = arr_match.end()
         recipes = []
-        # Split on recipe boundaries — each recipe starts with {"name"
-        parts = re.split(r'(?=\{"name")', text)
-        for part in parts:
-            part = part.strip().rstrip(',').strip()
-            if not part.startswith('{"name"'):
-                continue
-            # Try parsing this chunk as a single recipe object
-            try:
-                recipe = json.loads(part)
-                if isinstance(recipe, dict) and 'name' in recipe:
-                    recipes.append(recipe)
-            except json.JSONDecodeError:
-                # This chunk is incomplete (likely the last truncated one) — skip it
-                continue
+
+        # Walk through finding complete top-level objects in the array
+        while pos < len(text):
+            # Skip whitespace and commas
+            while pos < len(text) and text[pos] in ' \t\n\r,':
+                pos += 1
+            if pos >= len(text) or text[pos] != '{':
+                break
+
+            # Track brace depth to find the end of this object
+            start = pos
+            depth = 0
+            in_string = False
+            escape_next = False
+            found_end = False
+
+            for i in range(start, len(text)):
+                c = text[i]
+                if escape_next:
+                    escape_next = False
+                    continue
+                if c == '\\' and in_string:
+                    escape_next = True
+                    continue
+                if c == '"':
+                    in_string = not in_string
+                    continue
+                if in_string:
+                    continue
+                if c == '{':
+                    depth += 1
+                elif c == '}':
+                    depth -= 1
+                    if depth == 0:
+                        # Found a complete object
+                        obj_text = text[start:i + 1]
+                        try:
+                            obj = json.loads(obj_text)
+                            if isinstance(obj, dict) and 'name' in obj:
+                                recipes.append(obj)
+                        except json.JSONDecodeError:
+                            pass
+                        pos = i + 1
+                        found_end = True
+                        break
+            if not found_end:
+                # Ran out of text — this object was truncated
+                break
 
         if recipes:
             print(f"Salvaged {len(recipes)} complete recipes from truncated response")
