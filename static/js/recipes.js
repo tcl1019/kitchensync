@@ -171,7 +171,7 @@ function showRecipeHistory() {
                     ${recipe.thumbnail ? `<img class="recipe-card-thumb" src="${escapeHtml(recipe.thumbnail)}" alt="${escapeHtml(recipe.name)}" loading="lazy">` : ''}
                     <div class="recipe-card-meta">
                         <span class="meal-type-pill" data-type="${mealType}">${mealType}</span>
-                        ${recipe.source === 'themealdb' ? `<span class="recipe-source-badge recipe-source-real">Based on real recipe</span>` : `<span class="recipe-source-badge recipe-source-ai">AI Original</span>`}
+                        ${(recipe.source === 'themealdb' || recipe.source === 'api-ninjas') ? `<span class="recipe-source-badge recipe-source-real">Based on real recipe</span>` : `<span class="recipe-source-badge recipe-source-ai">AI Original</span>`}
                     </div>
                     <div class="recipe-name">${escapeHtml(recipe.name)}</div>
                     <div class="recipe-desc">${escapeHtml(recipe.description)}</div>
@@ -374,7 +374,7 @@ function displayRecipes(recipes) {
                 </div>
                 <div class="recipe-name">${escapeHtml(recipe.name)}</div>
                 <div class="recipe-desc">${escapeHtml(recipe.description)}</div>
-                ${source === 'themealdb' && sourceName ? `<div class="recipe-source"><span class="recipe-source-badge recipe-source-real">Based on ${escapeHtml(sourceName)}</span></div>` : source === 'ai' ? `<div class="recipe-source"><span class="recipe-source-badge recipe-source-ai">AI Original</span></div>` : ''}
+                ${(source === 'themealdb' || source === 'api-ninjas') && sourceName ? `<div class="recipe-source"><span class="recipe-source-badge recipe-source-real">Based on ${escapeHtml(sourceName)}</span></div>` : source === 'ai' ? `<div class="recipe-source"><span class="recipe-source-badge recipe-source-ai">AI Original</span></div>` : ''}
                 ${tags.length > 0 ? `<div class="recipe-tags">${tags.map(t => `<span class="recipe-tag">${escapeHtml(t)}</span>`).join('')}</div>` : ''}
                 <div class="recipe-badges">
                     <span class="recipe-pantry-badge">${pantryCount}/${totalIngredients} in pantry</span>
@@ -442,7 +442,7 @@ function showRecipeDetail(index) {
     // Source badge in modal
     const sourceBadge = document.getElementById('recipe-source-badge');
     if (sourceBadge) {
-        if (recipe.source === 'themealdb' && recipe.source_name) {
+        if ((recipe.source === 'themealdb' || recipe.source === 'api-ninjas') && recipe.source_name) {
             sourceBadge.className = 'recipe-source-badge recipe-source-real';
             sourceBadge.textContent = `Based on ${recipe.source_name}`;
             sourceBadge.style.display = '';

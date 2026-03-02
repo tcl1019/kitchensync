@@ -14,11 +14,13 @@ from anthropic import Anthropic
 class RecipeSuggester:
     """Generate recipe suggestions using Claude API."""
 
-    def __init__(self, client: Anthropic, max_suggestions: int = 5, mealdb_client=None):
+    def __init__(self, client: Anthropic, max_suggestions: int = 5,
+                 mealdb_client=None, ninjas_client=None):
         """Initialize the recipe suggester with Anthropic client."""
         self.client = client
         self.max_suggestions = max_suggestions
         self.mealdb_client = mealdb_client
+        self.ninjas_client = ninjas_client
 
     def suggest_recipes(self, pantry_items: List[Dict],
                         preferences: Optional[Dict] = None,
@@ -59,10 +61,8 @@ class RecipeSuggester:
         if user_prompt:
             user_prompt_section = f"\nUSER REQUEST: {user_prompt}\nHonor this request while using pantry items where possible.\n"
 
-        # Fetch grounding recipes from MealDB
-        grounding_section = ""
-        if self.mealdb_client:
-            grounding_section = self._build_grounding_section(pantry_items)
+        # Fetch grounding recipes from APIs
+        grounding_section = self._build_grounding_section(pantry_items)
 
         count = preferences.get('count', self.max_suggestions)
 
@@ -111,7 +111,7 @@ Return valid JSON only (no markdown, no code fences, no explanation):
       "cook_time": "10 min",
       "difficulty": "easy|medium|hard",
       "tags": ["low-carb", "quick"],
-      "source": "themealdb or ai",
+      "source": "themealdb or api-ninjas or ai",
       "source_name": "Original recipe name if adapted from a reference, otherwise empty string",
       "thumbnail": "thumbnail URL if from a reference recipe, otherwise empty string",
       "ingredients": [
@@ -170,31 +170,58 @@ Return valid JSON only (no markdown, no code fences, no explanation):
             return []
 
     def _build_grounding_section(self, pantry_items: List[Dict]) -> str:
-        """Fetch and format MealDB recipes as reference material for the Claude prompt."""
-        try:
-            grounding_recipes = self.mealdb_client.fetch_grounding_recipes(pantry_items)
-        except Exception as e:
-            print(f"MealDB grounding fetch error: {e}")
+        """Fetch and format recipes from MealDB + API Ninjas as reference material."""
+        mealdb_recipes = []
+        ninjas_recipes = []
+
+        if self.mealdb_client:
+            try:
+                mealdb_recipes = self.mealdb_client.fetch_grounding_recipes(pantry_items)
+            except Exception as e:
+                print(f"MealDB grounding fetch error: {e}")
+
+        if self.ninjas_client:
+            try:
+                ninjas_recipes = self.ninjas_client.fetch_grounding_recipes(pantry_items)
+            except Exception as e:
+                print(f"API Ninjas grounding fetch error: {e}")
+
+        if not mealdb_recipes and not ninjas_recipes:
             return ""
 
-        if not grounding_recipes:
-            return ""
+        total = len(mealdb_recipes) + len(ninjas_recipes)
+        must_use = min(total, 3)
 
         lines = [
-            "\nREFERENCE RECIPES (real recipes from TheMealDB — STRONGLY prefer these over making up recipes):",
-            f"You MUST use at least {min(len(grounding_recipes), 3)} of these as the basis for your suggestions.",
-            "Adapt them to use pantry items where possible. Keep the original name, set source to 'themealdb',",
-            "set source_name to the original recipe name, and include the thumbnail URL.",
+            "\nREFERENCE RECIPES (real recipes — STRONGLY prefer these over making up recipes):",
+            f"You MUST use at least {must_use} of these as the basis for your suggestions.",
+            "Adapt them to use pantry items where possible. Keep the original name.",
+            "For TheMealDB recipes: set source to 'themealdb', set source_name to the original name, include the thumbnail URL.",
+            "For API Ninjas recipes: set source to 'api-ninjas', set source_name to the original name, thumbnail is empty.",
             "Fill in any remaining slots with original recipes (set source to 'ai').\n",
         ]
 
-        for r in grounding_recipes:
-            ing_list = ", ".join(i["name"] for i in r.get("ingredients", [])[:8])
-            lines.append(f"- {r['name']} ({r.get('area', 'Unknown')} {r.get('category', '')})")
-            lines.append(f"  Ingredients: {ing_list}")
-            if r.get("thumbnail"):
-                lines.append(f"  Thumbnail: {r['thumbnail']}")
-            lines.append("")
+        if mealdb_recipes:
+            lines.append("--- From TheMealDB ---")
+            for r in mealdb_recipes:
+                ing_list = ", ".join(i["name"] for i in r.get("ingredients", [])[:8])
+                lines.append(f"- {r['name']} ({r.get('area', 'Unknown')} {r.get('category', '')})")
+                lines.append(f"  Ingredients: {ing_list}")
+                if r.get("thumbnail"):
+                    lines.append(f"  Thumbnail: {r['thumbnail']}")
+                lines.append("")
+
+        if ninjas_recipes:
+            lines.append("--- From API Ninjas ---")
+            for r in ninjas_recipes:
+                ing_list = ", ".join(i["name"] for i in r.get("ingredients", [])[:8])
+                lines.append(f"- {r['name']} (Servings: {r.get('servings', 'unknown')})")
+                lines.append(f"  Ingredients: {ing_list}")
+                if r.get("instructions"):
+                    # Include a snippet of instructions for better grounding
+                    snippet = r["instructions"][:200]
+                    lines.append(f"  Instructions preview: {snippet}...")
+                lines.append("")
 
         return "\n".join(lines)
 

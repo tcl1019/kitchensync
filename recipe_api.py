@@ -1,14 +1,17 @@
 """
-TheMealDB integration for grounding recipe suggestions in real data.
-Free API — no signup needed (test key "1").
+Recipe API integrations for grounding suggestions in real data.
+- TheMealDB: free API (test key "1"), has thumbnails, structured data
+- API Ninjas: keyed API, broader recipe coverage, needs normalization
 """
 
+import os
 import re
 import requests
 from typing import List, Dict, Optional
 
 
 MEALDB_BASE = "https://www.themealdb.com/api/json/v1/1"
+NINJAS_BASE = "https://api.api-ninjas.com/v1/recipe"
 
 # Priority for picking search ingredients (perishables first)
 CATEGORY_PRIORITY = {
@@ -200,3 +203,170 @@ class MealDBClient:
                 detailed.append(detail)
 
         return detailed
+
+
+class APINinjasClient:
+    """Client for API Ninjas Recipe API."""
+
+    def __init__(self, api_key: str, timeout: int = 5):
+        self.api_key = api_key
+        self.timeout = timeout
+
+    def search_recipes(self, query: str) -> List[Dict]:
+        """Search recipes by query string. Returns normalized list."""
+        if not self.api_key:
+            return []
+        try:
+            resp = requests.get(
+                NINJAS_BASE,
+                params={"query": query},
+                headers={"X-Api-Key": self.api_key},
+                timeout=self.timeout,
+            )
+            resp.raise_for_status()
+            raw_list = resp.json()
+            if not isinstance(raw_list, list):
+                return []
+            return [self._normalize(r) for r in raw_list if self._is_home_scale(r)]
+        except Exception as e:
+            print(f"API Ninjas search error: {e}")
+            return []
+
+    def _is_home_scale(self, raw: Dict) -> bool:
+        """Filter out industrial-scale recipes (e.g. 100 servings)."""
+        servings = raw.get("servings", "")
+        match = re.search(r'(\d+)', str(servings))
+        if match and int(match.group(1)) > 12:
+            return False
+        return True
+
+    def _normalize(self, raw: Dict) -> Dict:
+        """Normalize API Ninjas response to app format."""
+        title = self._title_case(raw.get("title", ""))
+        ingredients = self._parse_ingredients(raw.get("ingredients", ""))
+        instructions = self._clean_instructions(raw.get("instructions", ""))
+        servings = raw.get("servings", "")
+
+        return {
+            "name": title,
+            "ingredients": ingredients,
+            "instructions": instructions,
+            "servings": servings,
+            "source": "api-ninjas",
+        }
+
+    def _title_case(self, text: str) -> str:
+        """Fix ALL CAPS or weird casing to proper title case."""
+        if not text:
+            return ""
+        # If mostly uppercase, convert to title case
+        if sum(1 for c in text if c.isupper()) > len(text) * 0.5:
+            return text.title()
+        return text
+
+    def _parse_ingredients(self, raw: str) -> List[Dict]:
+        """Parse pipe-delimited ingredient string into structured list."""
+        if not raw:
+            return []
+        parts = [p.strip() for p in raw.split("|") if p.strip()]
+        ingredients = []
+        for part in parts:
+            # Skip section headers like "** Package Together **"
+            if part.startswith('**') or part.startswith('--'):
+                continue
+            # Fix ALL CAPS
+            if sum(1 for c in part if c.isupper()) > len(part) * 0.5:
+                part = part.title()
+            # Try to split "2 cups Flour" or "1/2 c Flour" into quantity/unit/name
+            match = re.match(
+                r'^([\d/\.\s]+(?:\d+/\d+)?)\s+'          # quantity (digits, fractions)
+                r'(cups?|c|tb|tbs|tbsp|ts|tsp|oz|lb|lbs|pt|qt|gal|ml|'
+                r'cloves?|slices?|cans?|pkg|pcs?|pieces?|pinch|dash|bunch|heads?)\s+'
+                r'(.+)',
+                part, re.IGNORECASE
+            )
+            if match:
+                qty = match.group(1).strip()
+                unit = (match.group(2) or "").strip()
+                name = match.group(3).strip().rstrip(';,.')
+                ingredients.append({"name": name, "measure": f"{qty} {unit}".strip()})
+            else:
+                # Try just quantity + name (no unit)
+                match2 = re.match(r'^([\d/\.]+)\s+(.+)', part)
+                if match2:
+                    qty = match2.group(1).strip()
+                    name = match2.group(2).strip().rstrip(';,.')
+                    ingredients.append({"name": name, "measure": qty})
+                else:
+                    ingredients.append({"name": part.rstrip(';,.'), "measure": ""})
+        return ingredients
+
+    def _clean_instructions(self, raw: str) -> str:
+        """Clean up ALL CAPS instructions and normalize whitespace."""
+        if not raw:
+            return ""
+        text = raw
+        # Fix ALL CAPS
+        if sum(1 for c in text if c.isupper()) > len(text) * 0.4:
+            # Sentence case: capitalize first letter of each sentence
+            sentences = re.split(r'(?<=[.!?])\s+', text.lower())
+            text = " ".join(s.capitalize() for s in sentences)
+        # Normalize whitespace
+        text = re.sub(r'\s+', ' ', text).strip()
+        return text
+
+    def fetch_grounding_recipes(
+        self,
+        pantry_items: List[Dict],
+        max_queries: int = 3,
+        max_recipes: int = 5,
+    ) -> List[Dict]:
+        """
+        Search API Ninjas with pantry-derived queries.
+        Returns normalized recipes for Claude grounding.
+        """
+        if not pantry_items or not self.api_key:
+            return []
+
+        # Extract search terms using the same keyword map as MealDB
+        search_terms = []
+        seen = set()
+        for item in pantry_items:
+            name = item.get("name", "").strip()
+            if not name:
+                continue
+            name_lower = name.lower()
+            for keyword in INGREDIENT_KEYWORDS:
+                if keyword in name_lower and keyword not in seen:
+                    seen.add(keyword)
+                    search_terms.append(keyword)
+
+        # Prioritize proteins
+        PROTEIN_KEYS = {'chicken', 'turkey', 'beef', 'pork', 'lamb', 'salmon',
+                        'shrimp', 'tuna', 'bacon', 'sausage', 'ham', 'steak',
+                        'egg', 'eggs', 'thigh', 'breast', 'drumstick', 'wing', 'mince'}
+        proteins = [t for t in search_terms if t in PROTEIN_KEYS]
+        others = [t for t in search_terms if t not in PROTEIN_KEYS]
+        queries = (proteins + others)[:max_queries]
+
+        if not queries:
+            return []
+
+        print(f"API Ninjas search queries: {queries}")
+
+        seen_names = set()
+        results = []
+        for q in queries:
+            recipes = self.search_recipes(q)
+            for r in recipes:
+                norm_name = r["name"].lower()
+                if norm_name not in seen_names:
+                    seen_names.add(norm_name)
+                    results.append(r)
+                    if len(results) >= max_recipes:
+                        break
+            if len(results) >= max_recipes:
+                break
+
+        print(f"API Ninjas found {len(results)} recipes")
+        return results

@@ -20,6 +20,9 @@ DATABASE_PATH = os.getenv('DATABASE_PATH', str(BASE_DIR / 'pantrypal.db'))
 # Anthropic API configuration
 ANTHROPIC_API_KEY = os.getenv('ANTHROPIC_API_KEY', '')
 
+# API Ninjas configuration
+API_NINJAS_KEY = os.getenv('API_NINJAS_KEY', '')
+
 # App configuration
 ITEMS_PER_PAGE = 20
 MAX_RECIPES_SUGGESTIONS = 5

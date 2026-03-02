@@ -20,12 +20,12 @@ from anthropic import Anthropic
 
 from config import (
     DEBUG, TESTING, SECRET_KEY, DATABASE_PATH,
-    ANTHROPIC_API_KEY, MAX_RECIPES_SUGGESTIONS
+    ANTHROPIC_API_KEY, API_NINJAS_KEY, MAX_RECIPES_SUGGESTIONS
 )
 from database import Database
 from parsers import InstacartParser, infer_unit
 from recipe_suggester import RecipeSuggester
-from recipe_api import MealDBClient
+from recipe_api import MealDBClient, APINinjasClient
 
 
 # Initialize Flask app
@@ -42,7 +42,11 @@ db.init_db()  # Ensure tables exist (safe to call multiple times)
 anthropic_client = Anthropic(api_key=ANTHROPIC_API_KEY) if ANTHROPIC_API_KEY else None
 parser = InstacartParser(anthropic_client)
 mealdb_client = MealDBClient()
-recipe_suggester = RecipeSuggester(anthropic_client, MAX_RECIPES_SUGGESTIONS, mealdb_client)
+ninjas_client = APINinjasClient(API_NINJAS_KEY) if API_NINJAS_KEY else None
+recipe_suggester = RecipeSuggester(
+    anthropic_client, MAX_RECIPES_SUGGESTIONS,
+    mealdb_client=mealdb_client, ninjas_client=ninjas_client
+)
 
 
 # ============================================================================
