@@ -17,6 +17,30 @@ function escapeHtml(text) {
 let selectedTags = [];
 let selectedMealType = 'all';
 
+// ============================================================================
+// Recipe Accumulation State
+// ============================================================================
+
+const MAX_VISIBLE_GENERATIONS = 3;
+window.allRecipeGenerations = [];
+
+const MEAL_GROUPS = {
+    'breakfast': { label: 'Breakfast', order: 0 },
+    'main':      { label: 'Lunch & Dinner', order: 1 },
+    'side':      { label: 'Sides & Snacks', order: 2 },
+    'snack':     { label: 'Sides & Snacks', order: 2 },
+};
+
+function groupRecipesByMealType(recipes) {
+    const groups = {};
+    recipes.forEach((recipe, index) => {
+        const g = MEAL_GROUPS[recipe.meal_type || 'main'] || MEAL_GROUPS['main'];
+        if (!groups[g.label]) groups[g.label] = { label: g.label, order: g.order, items: [] };
+        groups[g.label].items.push({ recipe, index });
+    });
+    return Object.values(groups).sort((a, b) => a.order - b.order);
+}
+
 function setupPreferenceChips() {
     // Dietary / style chips (multi-select toggles)
     document.querySelectorAll('#pref-chips .pref-chip').forEach(chip => {
@@ -84,14 +108,34 @@ function toggleFavoriteCard(index) {
     const recipe = window.currentRecipes[index];
     const nowFav = toggleFavorite(recipe);
 
-    // Update card button
-    const cards = document.querySelectorAll('#recipe-grid .recipe-card');
-    if (cards[index]) {
-        const btn = cards[index].querySelector('.recipe-fav-btn');
+    // Update all matching fav buttons across all grids
+    const cards = document.querySelectorAll(`#recipes-container .recipe-card[data-name="${CSS.escape(recipe.name)}"]`);
+    cards.forEach(card => {
+        const btn = card.querySelector('.recipe-fav-btn');
         if (btn) btn.classList.toggle('active', nowFav);
-    }
+    });
 
     showToast(nowFav ? 'Saved to favorites!' : 'Removed from favorites', nowFav ? 'success' : 'info');
+}
+
+function showRecipeFromGen(genIdx, recipeIdx) {
+    const gen = window.allRecipeGenerations[genIdx];
+    if (!gen || !gen.recipes[recipeIdx]) return;
+    window.currentRecipes = gen.recipes;
+    showRecipeDetail(recipeIdx);
+}
+
+function toggleFavoriteFromGen(genIdx, recipeIdx) {
+    const gen = window.allRecipeGenerations[genIdx];
+    if (!gen || !gen.recipes[recipeIdx]) return;
+    window.currentRecipes = gen.recipes;
+    toggleFavoriteCard(recipeIdx);
+}
+
+function addToGroceryFromGen(genIdx, recipeIdx) {
+    const gen = window.allRecipeGenerations[genIdx];
+    if (!gen || !gen.recipes[recipeIdx]) return;
+    addMissingToGrocery(gen.recipes[recipeIdx]);
 }
 
 function toggleFavoriteModal() {
@@ -215,24 +259,29 @@ function timeAgoShort(ts) {
 
 function showRecipeSkeletons() {
     const container = document.getElementById('recipes-container');
-    let html = `
-        <div class="recipes-header">
-            <h2>Generating recipes...</h2>
-        </div>
-        <div class="recipe-grid">`;
+    const skeletonHtml = `
+        <div id="recipe-skeleton-block">
+            <div class="recipes-header">
+                <h2>Generating recipes...</h2>
+            </div>
+            <div class="recipe-grid">
+                ${[0,1,2,3].map(i => `
+                    <div class="recipe-card skeleton" style="animation-delay: ${i * 0.1}s">
+                        <div class="skeleton-line skeleton-title"></div>
+                        <div class="skeleton-line skeleton-desc"></div>
+                        <div class="skeleton-line skeleton-desc short"></div>
+                        <div class="skeleton-line skeleton-meta"></div>
+                    </div>
+                `).join('')}
+            </div>
+        </div>`;
 
-    for (let i = 0; i < 4; i++) {
-        html += `
-            <div class="recipe-card skeleton" style="animation-delay: ${i * 0.1}s">
-                <div class="skeleton-line skeleton-title"></div>
-                <div class="skeleton-line skeleton-desc"></div>
-                <div class="skeleton-line skeleton-desc short"></div>
-                <div class="skeleton-line skeleton-meta"></div>
-            </div>`;
+    if (window.allRecipeGenerations && window.allRecipeGenerations.length > 0) {
+        // Prepend skeletons above existing generations
+        container.insertAdjacentHTML('afterbegin', skeletonHtml);
+    } else {
+        container.innerHTML = skeletonHtml;
     }
-
-    html += '</div>';
-    container.innerHTML = html;
 }
 
 // ============================================================================
@@ -257,7 +306,17 @@ async function suggestRecipes() {
             preferences,
             prompt: prompt || undefined
         });
-        displayRecipes(result.recipes);
+        // Accumulate: prepend new generation, cap at MAX
+        window.allRecipeGenerations.unshift({
+            recipes: result.recipes,
+            timestamp: Date.now(),
+            prompt: prompt || ''
+        });
+        if (window.allRecipeGenerations.length > MAX_VISIBLE_GENERATIONS) {
+            window.allRecipeGenerations = window.allRecipeGenerations.slice(0, MAX_VISIBLE_GENERATIONS);
+        }
+        window.currentRecipes = result.recipes;
+        displayAllGenerations();
         showToast(`Generated ${result.count} recipe suggestions!`, 'success');
 
         // Save to history
@@ -317,10 +376,84 @@ function difficultyDots(level) {
     return html;
 }
 
-function displayRecipes(recipes) {
-    const container = document.getElementById('recipes-container');
+function buildRecipeCardHTML(recipe, index, genIdx) {
+    const totalIngredients = recipe.ingredients ? recipe.ingredients.length : 0;
+    const pantryCount = recipe.ingredients ? recipe.ingredients.filter(i => i.in_pantry).length : 0;
+    const toBuy = totalIngredients - pantryCount;
+    const readiness = totalIngredients > 0 ? Math.round((pantryCount / totalIngredients) * 100) : 0;
+    const mealType = recipe.meal_type || 'main';
+    const cookTime = recipe.cook_time || '';
+    const difficulty = recipe.difficulty || 'easy';
+    const tags = recipe.tags || [];
+    const isFav = isFavorite(recipe);
+    const source = recipe.source || 'ai';
+    const sourceName = recipe.source_name || '';
+    const thumbnail = recipe.thumbnail || '';
 
-    if (!recipes || recipes.length === 0) {
+    return `
+        <div class="recipe-card" onclick="showRecipeFromGen(${genIdx}, ${index})" data-readiness="${readiness}" data-name="${escapeHtml(recipe.name)}" style="animation-delay: ${index * 0.06}s">
+            ${thumbnail ? `<img class="recipe-card-thumb" src="${escapeHtml(thumbnail)}" alt="${escapeHtml(recipe.name)}" loading="lazy">` : ''}
+            <button class="recipe-fav-btn ${isFav ? 'active' : ''}" onclick="event.stopPropagation(); toggleFavoriteFromGen(${genIdx}, ${index})" title="${isFav ? 'Remove from favorites' : 'Save recipe'}">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+            </button>
+            <div class="recipe-card-meta">
+                <span class="meal-type-pill" data-type="${mealType}">${mealType}</span>
+                ${cookTime ? `<span class="recipe-cook-time">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                    ${escapeHtml(cookTime)}
+                </span>` : ''}
+                ${difficultyDots(difficulty)}
+            </div>
+            <div class="recipe-name">${escapeHtml(recipe.name)}</div>
+            <div class="recipe-desc">${escapeHtml(recipe.description)}</div>
+            ${(source === 'themealdb' || source === 'api-ninjas') && sourceName ? `<div class="recipe-source"><span class="recipe-source-badge recipe-source-real">Based on ${escapeHtml(sourceName)}</span></div>` : source === 'ai' ? `<div class="recipe-source"><span class="recipe-source-badge recipe-source-ai">AI Original</span></div>` : ''}
+            ${tags.length > 0 ? `<div class="recipe-tags">${tags.map(t => `<span class="recipe-tag">${escapeHtml(t)}</span>`).join('')}</div>` : ''}
+            <div class="recipe-badges">
+                <span class="recipe-pantry-badge">${pantryCount}/${totalIngredients} in pantry</span>
+                ${toBuy > 0
+                    ? `<span class="recipe-buy-badge">${toBuy} to buy</span>`
+                    : '<span class="recipe-ready-badge">Ready to cook!</span>'}
+                ${recipe.instructions ? `<span class="recipe-meta-steps">${recipe.instructions.length} steps</span>` : ''}
+                ${toBuy > 0
+                    ? `<button class="recipe-cart-btn" onclick="event.stopPropagation(); addToGroceryFromGen(${genIdx}, ${index})" title="Add ${toBuy} missing to grocery list">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg>
+                       </button>`
+                    : ''}
+            </div>
+            <div class="recipe-readiness-bar">
+                <div class="readiness-fill" style="width:${readiness}%" data-pct="${readiness}"></div>
+            </div>
+        </div>`;
+}
+
+function buildRecipeGroupHTML(recipes, genIdx) {
+    if (selectedMealType !== 'all') {
+        // Flat grid when filtering to single meal type
+        let html = '<div class="recipe-grid">';
+        recipes.forEach((recipe, idx) => { html += buildRecipeCardHTML(recipe, idx, genIdx); });
+        html += '</div>';
+        return html;
+    }
+    // Grouped view
+    const groups = groupRecipesByMealType(recipes);
+    let html = '';
+    groups.forEach(group => {
+        html += `<div class="recipe-meal-group">`;
+        html += `<h3 class="recipe-group-header">${group.label}</h3>`;
+        html += `<div class="recipe-grid">`;
+        group.items.forEach(({ recipe, index }) => {
+            html += buildRecipeCardHTML(recipe, index, genIdx);
+        });
+        html += `</div></div>`;
+    });
+    return html;
+}
+
+function displayAllGenerations() {
+    const container = document.getElementById('recipes-container');
+    const gens = window.allRecipeGenerations;
+
+    if (!gens || gens.length === 0) {
         container.innerHTML = `
             <div class="recipes-hero">
                 <p>No recipes generated. Try again!</p>
@@ -328,75 +461,41 @@ function displayRecipes(recipes) {
         return;
     }
 
-    // Filter bar + header
     let html = `
         <div class="recipes-header">
             <h2>Your Recipes</h2>
-            <button class="btn-secondary" onclick="suggestRecipes()">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
-                Regenerate
-            </button>
+            <div class="recipes-header-actions">
+                <button class="btn-secondary" onclick="suggestRecipes()">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+                    Regenerate
+                </button>
+            </div>
         </div>
         <div class="recipe-filter-bar" id="recipe-filter-bar">
             <button class="recipe-filter active" data-filter="all" onclick="filterRecipeCards('all')">All</button>
             <button class="recipe-filter" data-filter="ready" onclick="filterRecipeCards('ready')">Ready to Cook</button>
             <button class="recipe-filter" data-filter="saved" onclick="filterRecipeCards('saved')">Saved</button>
-        </div>
-        <div class="recipe-grid" id="recipe-grid">`;
+        </div>`;
 
-    recipes.forEach((recipe, index) => {
-        const totalIngredients = recipe.ingredients ? recipe.ingredients.length : 0;
-        const pantryCount = recipe.ingredients ? recipe.ingredients.filter(i => i.in_pantry).length : 0;
-        const toBuy = totalIngredients - pantryCount;
-        const readiness = totalIngredients > 0 ? Math.round((pantryCount / totalIngredients) * 100) : 0;
-        const mealType = recipe.meal_type || 'main';
-        const cookTime = recipe.cook_time || '';
-        const difficulty = recipe.difficulty || 'easy';
-        const tags = recipe.tags || [];
-        const isFav = isFavorite(recipe);
-        const source = recipe.source || 'ai';
-        const sourceName = recipe.source_name || '';
-        const thumbnail = recipe.thumbnail || '';
-
-        html += `
-            <div class="recipe-card" onclick="showRecipeDetail(${index})" data-readiness="${readiness}" data-name="${escapeHtml(recipe.name)}" style="animation-delay: ${index * 0.06}s">
-                ${thumbnail ? `<img class="recipe-card-thumb" src="${escapeHtml(thumbnail)}" alt="${escapeHtml(recipe.name)}" loading="lazy">` : ''}
-                <button class="recipe-fav-btn ${isFav ? 'active' : ''}" onclick="event.stopPropagation(); toggleFavoriteCard(${index})" title="${isFav ? 'Remove from favorites' : 'Save recipe'}">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
-                </button>
-                <div class="recipe-card-meta">
-                    <span class="meal-type-pill" data-type="${mealType}">${mealType}</span>
-                    ${cookTime ? `<span class="recipe-cook-time">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                        ${escapeHtml(cookTime)}
-                    </span>` : ''}
-                    ${difficultyDots(difficulty)}
-                </div>
-                <div class="recipe-name">${escapeHtml(recipe.name)}</div>
-                <div class="recipe-desc">${escapeHtml(recipe.description)}</div>
-                ${(source === 'themealdb' || source === 'api-ninjas') && sourceName ? `<div class="recipe-source"><span class="recipe-source-badge recipe-source-real">Based on ${escapeHtml(sourceName)}</span></div>` : source === 'ai' ? `<div class="recipe-source"><span class="recipe-source-badge recipe-source-ai">AI Original</span></div>` : ''}
-                ${tags.length > 0 ? `<div class="recipe-tags">${tags.map(t => `<span class="recipe-tag">${escapeHtml(t)}</span>`).join('')}</div>` : ''}
-                <div class="recipe-badges">
-                    <span class="recipe-pantry-badge">${pantryCount}/${totalIngredients} in pantry</span>
-                    ${toBuy > 0
-                        ? `<span class="recipe-buy-badge">${toBuy} to buy</span>`
-                        : '<span class="recipe-ready-badge">Ready to cook!</span>'}
-                    ${recipe.instructions ? `<span class="recipe-meta-steps">${recipe.instructions.length} steps</span>` : ''}
-                    ${toBuy > 0
-                        ? `<button class="recipe-cart-btn" onclick="event.stopPropagation(); addMissingToGrocery(window.currentRecipes[${index}])" title="Add ${toBuy} missing to grocery list">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg>
-                           </button>`
-                        : ''}
-                </div>
-                <div class="recipe-readiness-bar">
-                    <div class="readiness-fill" style="width:${readiness}%" data-pct="${readiness}"></div>
-                </div>
+    gens.forEach((gen, genIdx) => {
+        if (genIdx > 0) {
+            const ago = timeAgoShort(gen.timestamp);
+            const label = gen.prompt ? escapeHtml(gen.prompt) : 'Previous';
+            html += `<div class="generation-divider">
+                <span class="generation-divider-label">${ago} &mdash; ${label}</span>
             </div>`;
+        }
+        html += buildRecipeGroupHTML(gen.recipes, genIdx);
     });
 
-    html += '</div>';
     container.innerHTML = html;
+}
+
+// Backward-compatible wrapper used by history view
+function displayRecipes(recipes) {
+    window.allRecipeGenerations = [{ recipes, timestamp: Date.now(), prompt: '' }];
     window.currentRecipes = recipes;
+    displayAllGenerations();
 
     // Show saved recipes notice if favorites exist
     const favs = getFavorites();
@@ -419,7 +518,8 @@ function filterRecipeCards(filter) {
     if (activeBtn) activeBtn.classList.add('active');
 
     // Show/hide cards
-    const cards = document.querySelectorAll('#recipe-grid .recipe-card');
+    const cards = document.querySelectorAll('#recipes-container .recipe-card');
+    const favs = filter === 'saved' ? getFavorites() : [];
     cards.forEach(card => {
         if (filter === 'all') {
             card.style.display = '';
@@ -427,9 +527,15 @@ function filterRecipeCards(filter) {
             card.style.display = card.dataset.readiness === '100' ? '' : 'none';
         } else if (filter === 'saved') {
             const name = card.dataset.name;
-            const favs = getFavorites();
             card.style.display = favs.some(f => f.name === name) ? '' : 'none';
         }
+    });
+
+    // Hide group headers when all cards in the group are hidden
+    document.querySelectorAll('#recipes-container .recipe-meal-group').forEach(group => {
+        const groupCards = group.querySelectorAll('.recipe-card');
+        const anyVisible = Array.from(groupCards).some(c => c.style.display !== 'none');
+        group.style.display = anyVisible ? '' : 'none';
     });
 }
 

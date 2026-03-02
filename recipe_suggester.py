@@ -8,6 +8,7 @@ import os
 import json
 import re
 from typing import List, Dict, Optional
+from concurrent.futures import ThreadPoolExecutor
 from anthropic import Anthropic
 
 
@@ -66,7 +67,7 @@ class RecipeSuggester:
 
         count = preferences.get('count', self.max_suggestions)
 
-        prompt = f"""You are a practical home cook, not a fancy chef. Given this pantry, suggest {count} realistic meals or snacks.
+        prompt = f"""You are a confident, flavor-forward home cook who makes restaurant-quality food without fuss. Given this pantry, suggest {count} realistic meals or snacks.
 
 ASSUMED KITCHEN STAPLES (do NOT list these as "to buy" — assume every kitchen has them):
 Salt, black pepper, olive oil, vegetable oil, butter, garlic powder, onion powder, paprika,
@@ -89,6 +90,15 @@ RECIPE COMPLETENESS — CRITICAL:
 - Each step should include specific temperatures, times, and techniques. NOT just "Cook the chicken" — instead "Heat olive oil in a large skillet over medium-high heat. Season chicken thighs with salt, pepper, and paprika. Cook 5-6 minutes per side until golden brown and internal temp reaches 165°F."
 - Include 5-8 steps for main dishes. 3-5 steps for simple snacks/sides.
 - Include prep steps (chopping, seasoning) and finishing steps (garnish, rest, plate).
+
+FLAVOR EXCELLENCE — make every recipe crave-worthy:
+- Brown and sear meats HARD. Use the fond — deglaze the pan with broth, wine, or vinegar.
+- Season at EVERY stage: salt the pasta water, season before searing, adjust at the end.
+- Finish dishes with acid: a squeeze of lemon, splash of vinegar, or dollop of sour cream brightens everything.
+- Use aromatics aggressively: garlic, ginger, shallots, fresh herbs are the backbone of flavor.
+- Specify exact spice combos, not just "add spices." Example: "1 tsp smoked paprika, 1/2 tsp cumin, pinch of cayenne."
+- Toast dry spices in oil before adding liquid — this blooms their flavor.
+- Think: "Would this recipe get 4+ stars on AllRecipes?" If the flavor profile is bland, fix it.
 
 FLAVOR SANITY CHECK — CRITICAL (violations will be rejected):
 - ONLY suggest recipes you could find on AllRecipes, Tasty, or a normal food blog.
@@ -126,7 +136,7 @@ Return valid JSON only (no markdown, no code fences, no explanation):
         try:
             message = self.client.messages.create(
                 model="claude-sonnet-4-5-20250929",
-                max_tokens=4500,
+                max_tokens=4000,
                 messages=[
                     {"role": "user", "content": prompt}
                 ]
@@ -174,17 +184,24 @@ Return valid JSON only (no markdown, no code fences, no explanation):
         mealdb_recipes = []
         ninjas_recipes = []
 
-        if self.mealdb_client:
-            try:
-                mealdb_recipes = self.mealdb_client.fetch_grounding_recipes(pantry_items)
-            except Exception as e:
-                print(f"MealDB grounding fetch error: {e}")
-
-        if self.ninjas_client:
-            try:
-                ninjas_recipes = self.ninjas_client.fetch_grounding_recipes(pantry_items)
-            except Exception as e:
-                print(f"API Ninjas grounding fetch error: {e}")
+        # Fetch from both APIs in parallel for speed
+        futures = {}
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            if self.mealdb_client:
+                futures['mealdb'] = executor.submit(
+                    self.mealdb_client.fetch_grounding_recipes, pantry_items)
+            if self.ninjas_client:
+                futures['ninjas'] = executor.submit(
+                    self.ninjas_client.fetch_grounding_recipes, pantry_items)
+            for key, future in futures.items():
+                try:
+                    result = future.result(timeout=12)
+                    if key == 'mealdb':
+                        mealdb_recipes = result
+                    else:
+                        ninjas_recipes = result
+                except Exception as e:
+                    print(f"{key} grounding fetch error: {e}")
 
         if not mealdb_recipes and not ninjas_recipes:
             return ""
@@ -263,6 +280,9 @@ Return valid JSON only (no markdown, no code fences, no explanation):
             else:
                 types_str = ', '.join(meal_types)
                 lines.append(f"- Include a mix of these meal types: {types_str}")
+
+        if not meal_types:
+            lines.append("- Include at least 1 breakfast recipe and at least 1 main dish. Fill remaining slots with a mix of mains, sides, or snacks.")
 
         max_time = preferences.get('max_cook_time')
         if max_time:

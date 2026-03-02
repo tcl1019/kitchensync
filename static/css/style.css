@@ -913,6 +913,45 @@ button { cursor: pointer; font-family: inherit; }
     gap: 0.75rem;
 }
 
+/* --- Meal Type Group Headers --- */
+.recipe-meal-group {
+    margin-bottom: 1.25rem;
+}
+
+.recipe-group-header {
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+    color: var(--text-muted);
+    padding-bottom: 0.45rem;
+    margin-bottom: 0.75rem;
+    border-bottom: 1px solid rgba(193, 123, 90, 0.12);
+}
+
+/* --- Generation Dividers --- */
+.generation-divider {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin: 1.5rem 0 1rem;
+}
+
+.generation-divider::before,
+.generation-divider::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: rgba(193, 123, 90, 0.15);
+}
+
+.generation-divider-label {
+    font-size: 0.65rem;
+    color: var(--text-muted);
+    white-space: nowrap;
+    letter-spacing: 0.3px;
+}
+
 .recipe-card {
     background: rgba(193, 123, 90, 0.05);
     border: 1px solid rgba(193, 123, 90, 0.1);
@@ -2045,6 +2084,20 @@ body[data-theme="light"] .recipe-card:hover {
     background: var(--bg-base);
     border-color: rgba(194, 106, 66, 0.2);
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
+}
+
+body[data-theme="light"] .recipe-group-header {
+    color: var(--text-secondary);
+    border-bottom-color: rgba(0, 0, 0, 0.08);
+}
+
+body[data-theme="light"] .generation-divider::before,
+body[data-theme="light"] .generation-divider::after {
+    background: rgba(0, 0, 0, 0.08);
+}
+
+body[data-theme="light"] .generation-divider-label {
+    color: var(--text-secondary);
 }
 
 /* Light theme — modals */
