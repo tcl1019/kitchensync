@@ -15,12 +15,20 @@ async function apiCall(method, endpoint, data = null) {
 
     try {
         const response = await fetch(endpoint, options);
-        const json = await response.json();
+        let json;
+        try {
+            json = await response.json();
+        } catch {
+            throw new Error(response.ok ? 'Invalid response from server' : `Request failed (HTTP ${response.status}). Please try again.`);
+        }
         if (!response.ok) throw new Error(json.error || `HTTP ${response.status}`);
         return json;
     } catch (error) {
         console.error('API Error:', error);
-        showToast(error.message, 'error');
+        const msg = error.message === 'Failed to fetch'
+            ? 'Request timed out. Please try again.'
+            : error.message;
+        showToast(msg, 'error');
         throw error;
     }
 }
