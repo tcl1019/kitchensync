@@ -67,10 +67,11 @@ class RecipeSuggester:
             else:
                 user_prompt_section = f"\nUSER REQUEST: {user_prompt}\nHonor this request while using pantry items where possible.\n"
 
-        # Fetch grounding recipes from APIs
+        # Fetch grounding recipes from APIs (with tight timeout to avoid
+        # eating into Claude API time budget)
         grounding_section = self._build_grounding_section(pantry_items) if pantry_items else ""
 
-        count = preferences.get('count', self.max_suggestions)
+        count = min(preferences.get('count', self.max_suggestions), 3)
 
         # Build mode-specific prompt sections
         if mode == 'discover':
@@ -115,57 +116,43 @@ powder, ketchup, mustard, mayo. Mark these as in_pantry: true when used.
 
 {rules_block}
 
-RECIPE COMPLETENESS — CRITICAL:
-- Instructions must be DETAILED and COMPLETE. A real person should be able to cook the dish from your instructions alone.
-- Each step should include specific temperatures, times, and techniques. NOT just "Cook the chicken" — instead "Heat olive oil in a large skillet over medium-high heat. Season chicken thighs with salt, pepper, and paprika. Cook 5-6 minutes per side until golden brown and internal temp reaches 165°F."
-- Include 5-8 steps for main dishes. 3-5 steps for simple snacks/sides.
-- Include prep steps (chopping, seasoning) and finishing steps (garnish, rest, plate).
+RECIPE INSTRUCTIONS — keep them concise but complete:
+- 4-6 steps for mains, 2-4 for snacks/sides. Combine related actions into single steps.
+- Include key temps and times but don't over-explain basic techniques.
+- Keep each step to 1-2 sentences max.
+- Use 6-10 ingredients per main dish. Keep it simple.
 
-FLAVOR EXCELLENCE — make every recipe crave-worthy:
-- Brown and sear meats HARD. Use the fond — deglaze the pan with broth, wine, or vinegar.
-- Season at EVERY stage: salt the pasta water, season before searing, adjust at the end.
-- Finish dishes with acid: a squeeze of lemon, splash of vinegar, or dollop of sour cream brightens everything.
-- Use aromatics aggressively: garlic, ginger, shallots, fresh herbs are the backbone of flavor.
-- Specify exact spice combos, not just "add spices." Example: "1 tsp smoked paprika, 1/2 tsp cumin, pinch of cayenne."
-- Toast dry spices in oil before adding liquid — this blooms their flavor.
-- Think: "Would this recipe get 4+ stars on AllRecipes?" If the flavor profile is bland, fix it.
-
-FLAVOR SANITY CHECK — CRITICAL (violations will be rejected):
-- ONLY suggest recipes you could find on AllRecipes, Tasty, or a normal food blog.
-- ABSOLUTELY NEVER combine: bacon + banana, bacon + clementine, bacon + mango, sausage + fruit, meat + sweet fruit.
-- The ONLY acceptable meat + fruit pairings are: pork + apple, prosciutto + melon, chicken + cranberry, ham + pineapple.
-- Do NOT wrap random things in bacon. "Bacon Wrapped Turkey" is not a home recipe. Use bacon in sandwiches, pasta, eggs, salads, burgers, or soups.
-- Every recipe must pass this test: "Could I google this recipe name and find it on a real cooking website?" If no, don't suggest it.
-- When the pantry has incompatible items (e.g. bacon AND bananas), use them in SEPARATE recipes, not together.
+FLAVOR RULES:
+- Brown meats well, deglaze pans, season at every stage, finish with acid.
+- Specify exact spice amounts. Toast spices in oil.
+- Only suggest recipes you'd find on AllRecipes or Tasty — no weird combos.
+- Never combine meat + sweet fruit except: pork+apple, prosciutto+melon, chicken+cranberry, ham+pineapple.
+- When pantry has incompatible items, use them in SEPARATE recipes.
 {pref_lines}{user_prompt_section}{grounding_section}{pantry_block}
 
-Return valid JSON only (no markdown, no code fences, no explanation):
-{{
-  "recipes": [
-    {{
-      "name": "Simple recipe name",
-      "description": "1 sentence — what it is and why it works with this pantry",
-      "meal_type": "main|snack|side|breakfast",
-      "cook_time": "10 min",
-      "difficulty": "easy|medium|hard",
-      "tags": ["low-carb", "quick"],
-      "source": "themealdb or api-ninjas or ai",
-      "source_name": "Original recipe name if adapted from a reference, otherwise empty string",
-      "thumbnail": "thumbnail URL if from a reference recipe, otherwise empty string",
-      "ingredients": [
-        {{"name": "ingredient", "quantity": "amount", "unit": "unit", "in_pantry": true}},
-        {{"name": "ingredient", "quantity": "amount", "unit": "unit", "in_pantry": false}}
-      ],
-      "instructions": ["Detailed step 1 with temps/times", "Detailed step 2", "...5-8 steps for mains"]
-    }}
-  ]
-}}"""
+IMPORTANT: Return ONLY raw JSON. No markdown, no ```json fences, no text before/after.
+{{"recipes": [
+  {{"name": "Short Name", "description": "1 sentence", "meal_type": "main|snack|side|breakfast",
+    "cook_time": "10 min", "difficulty": "easy|medium|hard", "tags": ["quick"],
+    "source": "ai", "source_name": "", "thumbnail": "",
+    "ingredients": [{{"name": "x", "quantity": "1", "unit": "cup", "in_pantry": true}}],
+    "instructions": ["Step 1 with temps/times.", "Step 2.", "Step 3."]}}
+]}}"""
 
         try:
-            message = self.client.messages.create(
-                model="claude-haiku-4-5-20251001",
-                max_tokens=3000,
+            # Use a dedicated client with no retries to prevent the SDK from
+            # sleeping inside the worker (which blocks gunicorn heartbeats and
+            # causes SIGKILL). Timeout is 25s to leave room for grounding calls
+            # within gunicorn's overall worker timeout.
+            no_retry_client = Anthropic(
+                api_key=os.getenv('ANTHROPIC_API_KEY'),
+                max_retries=0,
                 timeout=25.0,
+            )
+            message = no_retry_client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=4096,
+                system="You are a recipe JSON generator. Return ONLY valid raw JSON — never use markdown code fences, never include text outside the JSON object. Be concise: 1-2 sentences per instruction step, 6-8 ingredients per recipe.",
                 messages=[
                     {"role": "user", "content": prompt}
                 ]
@@ -173,40 +160,122 @@ Return valid JSON only (no markdown, no code fences, no explanation):
 
             response_text = message.content[0].text
 
-            # Strip markdown code fences if present
+            # Detect truncated responses
+            if message.stop_reason == 'max_tokens':
+                print(f"Warning: response truncated (stop_reason=max_tokens)")
+
+            # Strip markdown code fences if present (handles truncated responses
+            # where closing ``` may be missing)
             cleaned = response_text.strip()
-            fence_match = re.match(r'^```\w*\s*\n(.*?)```\s*$', cleaned, re.DOTALL)
-            if fence_match:
-                cleaned = fence_match.group(1).strip()
-            else:
+            if cleaned.startswith('```'):
+                # Remove opening fence line (e.g. "```json\n")
+                first_newline = cleaned.find('\n')
+                if first_newline != -1:
+                    cleaned = cleaned[first_newline + 1:]
+                # Remove closing fence if present
+                if cleaned.rstrip().endswith('```'):
+                    cleaned = cleaned.rstrip()[:-3]
                 cleaned = cleaned.strip()
 
             # Parse JSON response
             try:
                 data = json.loads(cleaned)
-                recipes = data.get('recipes', [])
-
-                # Apply defensive defaults for any missing fields
-                for recipe in recipes:
-                    recipe.setdefault('meal_type', 'main')
-                    recipe.setdefault('cook_time', '')
-                    recipe.setdefault('difficulty', 'easy')
-                    recipe.setdefault('tags', [])
-                    recipe.setdefault('ingredients', [])
-                    recipe.setdefault('instructions', [])
-                    recipe.setdefault('source', 'ai')
-                    recipe.setdefault('source_name', '')
-                    recipe.setdefault('thumbnail', '')
-
-                return recipes[:count]
             except json.JSONDecodeError as e:
-                print(f"JSON parsing error: {e}")
-                print(f"Response: {response_text}")
-                return []
+                # Always attempt repair — response may be truncated by
+                # max_tokens, timeout, or other reasons
+                print(f"JSON parse failed ({message.stop_reason}), attempting repair: {e}")
+                data = self._repair_truncated_json(cleaned)
+                if not data:
+                    print(f"Could not repair JSON. First 200 chars: {cleaned[:200]}")
+                    return []
+
+            recipes = data.get('recipes', [])
+
+            # Apply defensive defaults for any missing fields
+            for recipe in recipes:
+                recipe.setdefault('meal_type', 'main')
+                recipe.setdefault('cook_time', '')
+                recipe.setdefault('difficulty', 'easy')
+                recipe.setdefault('tags', [])
+                recipe.setdefault('ingredients', [])
+                recipe.setdefault('instructions', [])
+                recipe.setdefault('source', 'ai')
+                recipe.setdefault('source_name', '')
+                recipe.setdefault('thumbnail', '')
+
+            return recipes[:count]
 
         except Exception as e:
             print(f"Claude API error: {e}")
             return []
+
+    def _repair_truncated_json(self, text: str) -> Optional[Dict]:
+        """Attempt to salvage complete recipes from a truncated JSON response.
+
+        When the response is cut off, the JSON is incomplete. This method walks
+        through the recipes array tracking brace depth to find complete recipe
+        objects, skipping the final truncated one.
+        """
+        # Find the start of the recipes array
+        arr_match = re.search(r'"recipes"\s*:\s*\[', text)
+        if not arr_match:
+            return None
+
+        pos = arr_match.end()
+        recipes = []
+
+        # Walk through finding complete top-level objects in the array
+        while pos < len(text):
+            # Skip whitespace and commas
+            while pos < len(text) and text[pos] in ' \t\n\r,':
+                pos += 1
+            if pos >= len(text) or text[pos] != '{':
+                break
+
+            # Track brace depth to find the end of this object
+            start = pos
+            depth = 0
+            in_string = False
+            escape_next = False
+            found_end = False
+
+            for i in range(start, len(text)):
+                c = text[i]
+                if escape_next:
+                    escape_next = False
+                    continue
+                if c == '\\' and in_string:
+                    escape_next = True
+                    continue
+                if c == '"':
+                    in_string = not in_string
+                    continue
+                if in_string:
+                    continue
+                if c == '{':
+                    depth += 1
+                elif c == '}':
+                    depth -= 1
+                    if depth == 0:
+                        # Found a complete object
+                        obj_text = text[start:i + 1]
+                        try:
+                            obj = json.loads(obj_text)
+                            if isinstance(obj, dict) and 'name' in obj:
+                                recipes.append(obj)
+                        except json.JSONDecodeError:
+                            pass
+                        pos = i + 1
+                        found_end = True
+                        break
+            if not found_end:
+                # Ran out of text — this object was truncated
+                break
+
+        if recipes:
+            print(f"Salvaged {len(recipes)} complete recipes from truncated response")
+            return {"recipes": recipes}
+        return None
 
     def _build_grounding_section(self, pantry_items: List[Dict]) -> str:
         """Fetch and format recipes from MealDB + API Ninjas as reference material."""
@@ -224,7 +293,7 @@ Return valid JSON only (no markdown, no code fences, no explanation):
                     self.ninjas_client.fetch_grounding_recipes, pantry_items)
             for key, future in futures.items():
                 try:
-                    result = future.result(timeout=12)
+                    result = future.result(timeout=5)
                     if key == 'mealdb':
                         mealdb_recipes = result
                     else:
@@ -249,43 +318,33 @@ Return valid JSON only (no markdown, no code fences, no explanation):
             text = ing_names + " " + recipe_name
             return sum(1 for kw in pantry_keywords if kw in text)
 
-        # Skip obscure cuisines, score by relevance, take top 5
+        # Skip obscure cuisines, score by relevance, take top 3
         SKIP_AREAS = {'Japanese', 'Chinese', 'Vietnamese', 'Thai', 'Indian',
                       'Moroccan', 'Turkish', 'Egyptian', 'Tunisian', 'Croatian',
                       'Malaysian', 'Filipino', 'Kenyan'}
         candidates = [r for r in mealdb_recipes if r.get('area', '') not in SKIP_AREAS]
         candidates.sort(key=relevance_score, reverse=True)
-        filtered_mealdb = candidates[:5]
+        filtered_mealdb = candidates[:3]
 
-        all_refs = filtered_mealdb + ninjas_recipes[:3]  # Cap total references
+        all_refs = filtered_mealdb + ninjas_recipes[:2]  # Cap total references
         if not all_refs:
             return ""
 
-        must_use = min(len(all_refs), 3)
+        must_use = min(len(all_refs), 2)
 
         lines = [
-            f"\nREFERENCE RECIPES — MANDATORY (you MUST base at least {must_use} of your {self.max_suggestions} recipes on these):",
-            f"Your FIRST {must_use} recipes in the JSON array MUST be adapted from these references.",
-            "Simplify the recipe name if it's too fancy (e.g. 'Bubble & Squeak' → 'Bacon Potato Hash').",
-            "Adapt them to use pantry items. Set source/source_name/thumbnail as shown below.",
-            f"Only the remaining {self.max_suggestions - must_use} slots can be AI originals (source='ai').\n",
+            f"\nREFERENCE RECIPES (adapt at least {must_use} from these, rest can be original):",
+            "Simplify fancy names. Set source/source_name/thumbnail from reference.\n",
         ]
 
         for r in filtered_mealdb:
-            ing_list = ", ".join(i["name"] for i in r.get("ingredients", [])[:8])
-            lines.append(f"- {r['name']} ({r.get('area', 'Unknown')} {r.get('category', '')})")
-            lines.append(f"  Ingredients: {ing_list}")
-            if r.get("thumbnail"):
-                lines.append(f"  Thumbnail: {r['thumbnail']}")
-            lines.append(f"  → Set source='themealdb', source_name='{r['name']}', thumbnail='{r.get('thumbnail', '')}'")
-            lines.append("")
+            ing_list = ", ".join(i["name"] for i in r.get("ingredients", [])[:5])
+            thumb = r.get('thumbnail', '')
+            lines.append(f"- {r['name']}: {ing_list} (source='themealdb', thumbnail='{thumb}')")
 
-        for r in ninjas_recipes[:3]:
-            ing_list = ", ".join(i["name"] for i in r.get("ingredients", [])[:8])
-            lines.append(f"- {r['name']} (Servings: {r.get('servings', 'unknown')})")
-            lines.append(f"  Ingredients: {ing_list}")
-            lines.append(f"  → Set source='api-ninjas', source_name='{r['name']}', thumbnail=''")
-            lines.append("")
+        for r in ninjas_recipes[:2]:
+            ing_list = ", ".join(i["name"] for i in r.get("ingredients", [])[:5])
+            lines.append(f"- {r['name']}: {ing_list} (source='api-ninjas')")
 
         return "\n".join(lines)
 

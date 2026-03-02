@@ -129,11 +129,11 @@ def add_item():
     except (ValueError, TypeError):
         return jsonify({'error': 'Invalid quantity'}), 400
 
-    unit = data.get('unit', '').strip()
+    unit = (data.get('unit') or '').strip()
     if not unit:
         unit = infer_unit(name)
-    category = data.get('category', 'Other').strip()
-    notes = data.get('notes', '').strip() or None
+    category = (data.get('category') or 'Other').strip()
+    notes = (data.get('notes') or '').strip() or None
 
     # Add to database
     item_id = db.add_item(
@@ -188,8 +188,8 @@ def update_item(item_id):
         except (ValueError, TypeError):
             return jsonify({'error': 'Invalid quantity'}), 400
 
-    unit = data.get('unit', '').strip() or None
-    notes = data.get('notes', '').strip() or None
+    unit = (data.get('unit') or '').strip() or None
+    notes = (data.get('notes') or '').strip() or None
 
     success = db.update_item(item_id, quantity=quantity, unit=unit, notes=notes)
 
