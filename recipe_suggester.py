@@ -189,39 +189,57 @@ Return valid JSON only (no markdown, no code fences, no explanation):
         if not mealdb_recipes and not ninjas_recipes:
             return ""
 
-        total = len(mealdb_recipes) + len(ninjas_recipes)
-        must_use = min(total, 3)
+        # Score and filter MealDB recipes by pantry relevance
+        pantry_keywords = set()
+        for item in pantry_items:
+            for word in item.get('name', '').lower().split():
+                if len(word) > 3:
+                    pantry_keywords.add(word)
+
+        def relevance_score(recipe):
+            """Score how relevant a recipe is to our pantry."""
+            ing_names = " ".join(i.get("name", "").lower() for i in recipe.get("ingredients", []))
+            recipe_name = recipe.get("name", "").lower()
+            text = ing_names + " " + recipe_name
+            return sum(1 for kw in pantry_keywords if kw in text)
+
+        # Skip obscure cuisines, score by relevance, take top 5
+        SKIP_AREAS = {'Japanese', 'Chinese', 'Vietnamese', 'Thai', 'Indian',
+                      'Moroccan', 'Turkish', 'Egyptian', 'Tunisian', 'Croatian',
+                      'Malaysian', 'Filipino', 'Kenyan'}
+        candidates = [r for r in mealdb_recipes if r.get('area', '') not in SKIP_AREAS]
+        candidates.sort(key=relevance_score, reverse=True)
+        filtered_mealdb = candidates[:5]
+
+        all_refs = filtered_mealdb + ninjas_recipes[:3]  # Cap total references
+        if not all_refs:
+            return ""
+
+        must_use = min(len(all_refs), 3)
 
         lines = [
-            "\nREFERENCE RECIPES (real recipes — STRONGLY prefer these over making up recipes):",
-            f"You MUST use at least {must_use} of these as the basis for your suggestions.",
-            "Adapt them to use pantry items where possible. Keep the original name.",
-            "For TheMealDB recipes: set source to 'themealdb', set source_name to the original name, include the thumbnail URL.",
-            "For API Ninjas recipes: set source to 'api-ninjas', set source_name to the original name, thumbnail is empty.",
-            "Fill in any remaining slots with original recipes (set source to 'ai').\n",
+            f"\nREFERENCE RECIPES — MANDATORY (you MUST base at least {must_use} of your {self.max_suggestions} recipes on these):",
+            f"Your FIRST {must_use} recipes in the JSON array MUST be adapted from these references.",
+            "Simplify the recipe name if it's too fancy (e.g. 'Bubble & Squeak' → 'Bacon Potato Hash').",
+            "Adapt them to use pantry items. Set source/source_name/thumbnail as shown below.",
+            f"Only the remaining {self.max_suggestions - must_use} slots can be AI originals (source='ai').\n",
         ]
 
-        if mealdb_recipes:
-            lines.append("--- From TheMealDB ---")
-            for r in mealdb_recipes:
-                ing_list = ", ".join(i["name"] for i in r.get("ingredients", [])[:8])
-                lines.append(f"- {r['name']} ({r.get('area', 'Unknown')} {r.get('category', '')})")
-                lines.append(f"  Ingredients: {ing_list}")
-                if r.get("thumbnail"):
-                    lines.append(f"  Thumbnail: {r['thumbnail']}")
-                lines.append("")
+        for r in filtered_mealdb:
+            ing_list = ", ".join(i["name"] for i in r.get("ingredients", [])[:8])
+            lines.append(f"- {r['name']} ({r.get('area', 'Unknown')} {r.get('category', '')})")
+            lines.append(f"  Ingredients: {ing_list}")
+            if r.get("thumbnail"):
+                lines.append(f"  Thumbnail: {r['thumbnail']}")
+            lines.append(f"  → Set source='themealdb', source_name='{r['name']}', thumbnail='{r.get('thumbnail', '')}'")
+            lines.append("")
 
-        if ninjas_recipes:
-            lines.append("--- From API Ninjas ---")
-            for r in ninjas_recipes:
-                ing_list = ", ".join(i["name"] for i in r.get("ingredients", [])[:8])
-                lines.append(f"- {r['name']} (Servings: {r.get('servings', 'unknown')})")
-                lines.append(f"  Ingredients: {ing_list}")
-                if r.get("instructions"):
-                    # Include a snippet of instructions for better grounding
-                    snippet = r["instructions"][:200]
-                    lines.append(f"  Instructions preview: {snippet}...")
-                lines.append("")
+        for r in ninjas_recipes[:3]:
+            ing_list = ", ".join(i["name"] for i in r.get("ingredients", [])[:8])
+            lines.append(f"- {r['name']} (Servings: {r.get('servings', 'unknown')})")
+            lines.append(f"  Ingredients: {ing_list}")
+            lines.append(f"  → Set source='api-ninjas', source_name='{r['name']}', thumbnail=''")
+            lines.append("")
 
         return "\n".join(lines)
 
