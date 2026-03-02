@@ -64,7 +64,7 @@ class Database:
 
         if existing:
             item_id = existing[0]
-            new_qty = quantity
+            new_qty = existing[1] + quantity
             cursor.execute(
                 'UPDATE pantry_items SET quantity = ?, unit = ?, category = ?, notes = ? WHERE id = ?',
                 (new_qty, unit, category, notes, item_id)

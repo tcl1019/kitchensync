@@ -14,8 +14,8 @@ const STATIC_ASSETS = [
   '/static/js/app.js',
   '/static/js/pantry.js',
   '/static/js/recipes.js',
-  '/static/manifest.json',
-  '/offline.html'
+  '/static/js/grocery.js',
+  '/static/manifest.json'
 ];
 
 // Install event: cache static assets

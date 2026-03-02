@@ -618,15 +618,30 @@ function showRecipeDetail(index) {
             ingredientsHtml += `
                 <li class="${cls}">
                     <strong>${escapeHtml(ing.name)}</strong>
-                    ${qty ? `<span class="ingredient-qty">${qty}</span>` : ''}
+                    ${qty ? `<span class="ingredient-qty">${escapeHtml(String(qty))}</span>` : ''}
                     ${!ing.in_pantry ? `<span class="ingredient-add-actions">
-                        <button class="btn-quick-add btn-add-pantry" onclick="event.stopPropagation();quickAddIngredient('${escapeHtml(ing.name).replace(/'/g, "\\'")}', '${escapeHtml(ing.quantity || '1').replace(/'/g, "\\'")}', '${escapeHtml(ing.unit || '').replace(/'/g, "\\'")}', this)" title="Add to pantry">+ Pantry</button>
-                        <button class="btn-quick-add btn-add-grocery-single" onclick="event.stopPropagation();quickAddToGrocery('${escapeHtml(ing.name).replace(/'/g, "\\'")}', '${escapeHtml(ing.quantity || '').replace(/'/g, "\\'")}', '${escapeHtml(ing.unit || '').replace(/'/g, "\\'")}', this)" title="Add to grocery list">+ List</button>
+                        <button class="btn-quick-add btn-add-pantry" data-ing-idx="${ingIdx}" data-action="pantry" title="Add to pantry">+ Pantry</button>
+                        <button class="btn-quick-add btn-add-grocery-single" data-ing-idx="${ingIdx}" data-action="grocery" title="Add to grocery list">+ List</button>
                     </span>` : ''}
                 </li>`;
         });
     }
     ingredientsList.innerHTML = ingredientsHtml;
+
+    // Bind ingredient action buttons via event delegation (avoids inline handlers)
+    ingredientsList.querySelectorAll('button[data-ing-idx]').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const idx = parseInt(btn.dataset.ingIdx, 10);
+            const ing = recipe.ingredients[idx];
+            if (!ing) return;
+            if (btn.dataset.action === 'pantry') {
+                quickAddIngredient(ing.name, ing.quantity || '1', ing.unit || '', btn);
+            } else if (btn.dataset.action === 'grocery') {
+                quickAddToGrocery(ing.name, ing.quantity || '', ing.unit || '', btn);
+            }
+        });
+    });
 
     // Instructions
     const instructionsList = document.getElementById('recipe-instructions');
