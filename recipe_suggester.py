@@ -164,14 +164,18 @@ Return valid JSON only (no markdown, no code fences, no explanation):
         try:
             message = self.client.messages.create(
                 model="claude-haiku-4-5-20251001",
-                max_tokens=3000,
-                timeout=25.0,
+                max_tokens=10000,
+                timeout=45.0,
                 messages=[
                     {"role": "user", "content": prompt}
                 ]
             )
 
             response_text = message.content[0].text
+
+            # Detect truncated responses
+            if message.stop_reason == 'max_tokens':
+                print(f"Warning: response truncated (stop_reason=max_tokens)")
 
             # Strip markdown code fences if present
             cleaned = response_text.strip()
@@ -184,29 +188,67 @@ Return valid JSON only (no markdown, no code fences, no explanation):
             # Parse JSON response
             try:
                 data = json.loads(cleaned)
-                recipes = data.get('recipes', [])
-
-                # Apply defensive defaults for any missing fields
-                for recipe in recipes:
-                    recipe.setdefault('meal_type', 'main')
-                    recipe.setdefault('cook_time', '')
-                    recipe.setdefault('difficulty', 'easy')
-                    recipe.setdefault('tags', [])
-                    recipe.setdefault('ingredients', [])
-                    recipe.setdefault('instructions', [])
-                    recipe.setdefault('source', 'ai')
-                    recipe.setdefault('source_name', '')
-                    recipe.setdefault('thumbnail', '')
-
-                return recipes[:count]
             except json.JSONDecodeError as e:
-                print(f"JSON parsing error: {e}")
-                print(f"Response: {response_text}")
-                return []
+                if message.stop_reason == 'max_tokens':
+                    # Response was truncated — try to salvage complete recipes
+                    print(f"JSON truncated, attempting repair: {e}")
+                    data = self._repair_truncated_json(cleaned)
+                    if not data:
+                        print(f"Could not repair truncated JSON")
+                        return []
+                else:
+                    print(f"JSON parsing error: {e}")
+                    print(f"Response: {response_text}")
+                    return []
+
+            recipes = data.get('recipes', [])
+
+            # Apply defensive defaults for any missing fields
+            for recipe in recipes:
+                recipe.setdefault('meal_type', 'main')
+                recipe.setdefault('cook_time', '')
+                recipe.setdefault('difficulty', 'easy')
+                recipe.setdefault('tags', [])
+                recipe.setdefault('ingredients', [])
+                recipe.setdefault('instructions', [])
+                recipe.setdefault('source', 'ai')
+                recipe.setdefault('source_name', '')
+                recipe.setdefault('thumbnail', '')
+
+            return recipes[:count]
 
         except Exception as e:
             print(f"Claude API error: {e}")
             return []
+
+    def _repair_truncated_json(self, text: str) -> Optional[Dict]:
+        """Attempt to salvage complete recipes from a truncated JSON response.
+
+        When max_tokens is hit, the JSON is cut off mid-way. This method finds
+        the last complete recipe object and returns a valid dict with those recipes.
+        """
+        # Find all complete recipe objects by looking for the pattern between
+        # opening { with "name" and the next }, accounting for nested braces
+        recipes = []
+        # Split on recipe boundaries — each recipe starts with {"name"
+        parts = re.split(r'(?=\{"name")', text)
+        for part in parts:
+            part = part.strip().rstrip(',').strip()
+            if not part.startswith('{"name"'):
+                continue
+            # Try parsing this chunk as a single recipe object
+            try:
+                recipe = json.loads(part)
+                if isinstance(recipe, dict) and 'name' in recipe:
+                    recipes.append(recipe)
+            except json.JSONDecodeError:
+                # This chunk is incomplete (likely the last truncated one) — skip it
+                continue
+
+        if recipes:
+            print(f"Salvaged {len(recipes)} complete recipes from truncated response")
+            return {"recipes": recipes}
+        return None
 
     def _build_grounding_section(self, pantry_items: List[Dict]) -> str:
         """Fetch and format recipes from MealDB + API Ninjas as reference material."""
