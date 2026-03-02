@@ -165,6 +165,7 @@ Return valid JSON only (no markdown, no code fences, no explanation):
             message = self.client.messages.create(
                 model="claude-sonnet-4-5-20250929",
                 max_tokens=4000,
+                timeout=90.0,
                 messages=[
                     {"role": "user", "content": prompt}
                 ]
