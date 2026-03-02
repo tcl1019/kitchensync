@@ -444,6 +444,18 @@ h1, h2, h3 {
 
 .search-clear.hidden { display: none; }
 
+.search-kbd {
+    position: absolute;
+    right: 0.6rem;
+    top: 50%;
+    transform: translateY(-50%);
+    pointer-events: none;
+    transition: opacity 0.15s;
+}
+
+.search-wrapper:focus-within .search-kbd,
+.search-clear:not(.hidden) ~ .search-kbd { opacity: 0; }
+
 /* --- Toolbar --- */
 .toolbar {
     display: flex;
@@ -1989,11 +2001,24 @@ button { cursor: pointer; font-family: inherit; }
 
     .recipe-grid { grid-template-columns: 1fr; }
 
+    .search-kbd { display: none; }
+
     #toast-container {
         bottom: 1rem;
         right: 1rem;
         left: 1rem;
         max-width: none;
+    }
+
+    .toast { animation: slideUp 0.3s var(--ease-out); }
+    .toast.dismissing { animation: slideDown 0.3s ease forwards; }
+
+    @keyframes slideUp {
+        from { transform: translateY(40px); opacity: 0; }
+        to { transform: translateY(0); opacity: 1; }
+    }
+    @keyframes slideDown {
+        to { transform: translateY(40px); opacity: 0; }
     }
 }
 
@@ -3084,9 +3109,7 @@ body[data-theme="light"] .btn-add-grocery-single:hover {
 
 .modal-header-left h2 {
     margin: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    word-break: break-word;
 }
 
 .modal-header-right {
