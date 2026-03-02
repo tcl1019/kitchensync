@@ -94,9 +94,14 @@
                         <span class="grid-item-emoji">{{ category_emoji(cat) }}</span>
                         <span class="grid-item-name">{{ item.name }}</span>
                     </div>
-                    <button class="grid-item-remove" onclick="removeItem({{ item.id }})" title="Remove">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-                    </button>
+                    <div class="grid-item-actions">
+                        <button class="grid-item-recipe" onclick="event.stopPropagation();quickRecipe('{{ item.name }}')" title="Find recipes">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+                        </button>
+                        <button class="grid-item-remove" onclick="removeItem({{ item.id }})" title="Remove">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                        </button>
+                    </div>
                 </div>
                 <div class="grid-item-bottom">
                     <div class="qty-controls">
@@ -144,6 +149,14 @@
         </div>
     </div>
 
+    <!-- Natural Language Prompt -->
+    <div class="recipe-prompt-wrap">
+        <textarea id="recipe-prompt" class="recipe-prompt"
+                  placeholder="What are you in the mood for? e.g. 'something quick with the chicken', 'healthy lunch for work'"
+                  rows="2" maxlength="500"></textarea>
+        <span class="recipe-prompt-hint">Optional — or just hit Generate</span>
+    </div>
+
     <!-- Action Row -->
     <div class="recipe-action-row">
         <button id="suggest-btn" class="btn-primary btn-large">
@@ -153,6 +166,10 @@
         <button id="surprise-btn" class="btn-surprise">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
             Surprise Me!
+        </button>
+        <button id="history-btn" class="btn-history" onclick="showRecipeHistory()">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            History
         </button>
     </div>
 
@@ -238,8 +255,16 @@
 <div id="recipe-modal" class="modal hidden">
     <div class="modal-content modal-large">
         <div class="modal-header">
-            <h2 id="recipe-title">Recipe</h2>
-            <button class="modal-close">&times;</button>
+            <div class="modal-header-left">
+                <h2 id="recipe-title">Recipe</h2>
+                <span id="recipe-source-badge" class="recipe-source-badge"></span>
+            </div>
+            <div class="modal-header-right">
+                <button id="recipe-modal-fav" class="recipe-fav-btn-modal" onclick="toggleFavoriteModal()" title="Save recipe">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+                </button>
+                <button class="modal-close">&times;</button>
+            </div>
         </div>
         <div class="modal-body">
             <p id="recipe-description" class="recipe-description"></p>
@@ -250,11 +275,48 @@
             <h3>Instructions</h3>
             <ol id="recipe-instructions" class="instructions-list"></ol>
 
+            <div class="recipe-modal-actions">
+                <button id="start-cooking-btn" class="btn-primary btn-cooking-start" onclick="startCookingMode()">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+                    Start Cooking
+                </button>
+            </div>
+
             <h3>Shopping List</h3>
             <div id="shopping-list-container">
                 <button id="get-shopping-list-btn" class="btn-primary">Generate Shopping List</button>
             </div>
         </div>
+    </div>
+</div>
+
+<!-- ======================== COOKING MODE OVERLAY ======================== -->
+<div id="cooking-mode" class="cooking-mode hidden">
+    <div class="cooking-mode-header">
+        <span id="cooking-mode-title" class="cooking-mode-recipe-name"></span>
+        <button class="btn-cooking-exit" onclick="exitCookingMode()">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            Exit
+        </button>
+    </div>
+    <div class="cooking-mode-body">
+        <div class="cooking-mode-step-indicator">
+            <span id="cooking-step-label">Step 1 of 5</span>
+            <div class="cooking-progress-bar">
+                <div class="cooking-progress-fill" id="cooking-progress-fill"></div>
+            </div>
+        </div>
+        <div class="cooking-mode-instruction" id="cooking-instruction"></div>
+    </div>
+    <div class="cooking-mode-nav">
+        <button id="cooking-prev" class="btn-cooking-nav" onclick="cookingStep(-1)">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+            Previous
+        </button>
+        <button id="cooking-next" class="btn-cooking-nav btn-primary" onclick="cookingStep(1)">
+            Next
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+        </button>
     </div>
 </div>
 {% endblock %}

@@ -348,9 +348,14 @@ async function refreshPantryItems() {
                             <span class="grid-item-emoji">${emoji}</span>
                             <span class="grid-item-name">${escapeHtml(item.name)}</span>
                         </div>
-                        <button class="grid-item-remove" onclick="removeItem(${item.id})" title="Remove">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-                        </button>
+                        <div class="grid-item-actions">
+                            <button class="grid-item-recipe" onclick="event.stopPropagation();quickRecipe('${escapeHtml(item.name).replace(/'/g, "\\'")}')" title="Find recipes">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+                            </button>
+                            <button class="grid-item-remove" onclick="removeItem(${item.id})" title="Remove">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                            </button>
+                        </div>
                     </div>
                     <div class="grid-item-bottom">
                         <div class="qty-controls">
@@ -705,6 +710,28 @@ function applyView(view) {
     document.querySelectorAll('.view-btn').forEach(btn => {
         btn.classList.toggle('active', btn.dataset.view === view);
     });
+}
+
+// ============================================================================
+// Quick Recipe Action (from pantry item → recipes tab)
+// ============================================================================
+
+function quickRecipe(ingredientName) {
+    // Switch to recipes tab
+    const recipesTab = document.querySelector('.tab[data-tab="recipes"]');
+    if (recipesTab) recipesTab.click();
+
+    // Fill the prompt textarea
+    const promptEl = document.getElementById('recipe-prompt');
+    if (promptEl) {
+        promptEl.value = `Use up the ${ingredientName}`;
+        promptEl.focus();
+    }
+
+    // Auto-generate after a short delay
+    setTimeout(() => {
+        if (typeof suggestRecipes === 'function') suggestRecipes();
+    }, 150);
 }
 
 // ============================================================================

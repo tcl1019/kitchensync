@@ -25,6 +25,7 @@ from config import (
 from database import Database
 from parsers import InstacartParser, infer_unit
 from recipe_suggester import RecipeSuggester
+from recipe_api import MealDBClient
 
 
 # Initialize Flask app
@@ -40,7 +41,8 @@ db.init_db()  # Ensure tables exist (safe to call multiple times)
 # Initialize Anthropic client
 anthropic_client = Anthropic(api_key=ANTHROPIC_API_KEY) if ANTHROPIC_API_KEY else None
 parser = InstacartParser(anthropic_client)
-recipe_suggester = RecipeSuggester(anthropic_client, MAX_RECIPES_SUGGESTIONS)
+mealdb_client = MealDBClient()
+recipe_suggester = RecipeSuggester(anthropic_client, MAX_RECIPES_SUGGESTIONS, mealdb_client)
 
 
 # ============================================================================
@@ -407,6 +409,7 @@ def suggest_recipes():
     """
     data = request.get_json() or {}
     preferences = data.get('preferences', {})
+    user_prompt = (data.get('prompt', '') or '').strip() or None
     pantry_items = db.get_all_items()
 
     if not pantry_items:
@@ -414,8 +417,10 @@ def suggest_recipes():
             'error': 'Your pantry is empty. Add some items first to get recipe suggestions.'
         }), 400
 
-    # Get recipe suggestions from Claude
-    recipes = recipe_suggester.suggest_recipes(pantry_items, preferences=preferences)
+    # Get recipe suggestions from Claude (with optional user prompt and MealDB grounding)
+    recipes = recipe_suggester.suggest_recipes(
+        pantry_items, preferences=preferences, user_prompt=user_prompt
+    )
 
     if not recipes:
         return jsonify({
