@@ -67,10 +67,11 @@ class RecipeSuggester:
             else:
                 user_prompt_section = f"\nUSER REQUEST: {user_prompt}\nHonor this request while using pantry items where possible.\n"
 
-        # Fetch grounding recipes from APIs
+        # Fetch grounding recipes from APIs (with tight timeout to avoid
+        # eating into Claude API time budget)
         grounding_section = self._build_grounding_section(pantry_items) if pantry_items else ""
 
-        count = min(preferences.get('count', self.max_suggestions), 4)
+        count = min(preferences.get('count', self.max_suggestions), 3)
 
         # Build mode-specific prompt sections
         if mode == 'discover':
@@ -139,11 +140,19 @@ IMPORTANT: Return ONLY raw JSON. No markdown, no ```json fences, no text before/
 ]}}"""
 
         try:
-            message = self.client.messages.create(
+            # Use a dedicated client with no retries to prevent the SDK from
+            # sleeping inside the worker (which blocks gunicorn heartbeats and
+            # causes SIGKILL). Timeout is 25s to leave room for grounding calls
+            # within gunicorn's overall worker timeout.
+            no_retry_client = Anthropic(
+                api_key=os.getenv('ANTHROPIC_API_KEY'),
+                max_retries=0,
+                timeout=25.0,
+            )
+            message = no_retry_client.messages.create(
                 model="claude-haiku-4-5-20251001",
-                max_tokens=8000,
-                timeout=45.0,
-                system="You are a recipe JSON generator. Return ONLY valid raw JSON — never use markdown code fences, never include text outside the JSON object. Be concise in instructions: 1-2 sentences per step.",
+                max_tokens=4096,
+                system="You are a recipe JSON generator. Return ONLY valid raw JSON — never use markdown code fences, never include text outside the JSON object. Be concise: 1-2 sentences per instruction step, 6-8 ingredients per recipe.",
                 messages=[
                     {"role": "user", "content": prompt}
                 ]
@@ -284,7 +293,7 @@ IMPORTANT: Return ONLY raw JSON. No markdown, no ```json fences, no text before/
                     self.ninjas_client.fetch_grounding_recipes, pantry_items)
             for key, future in futures.items():
                 try:
-                    result = future.result(timeout=12)
+                    result = future.result(timeout=5)
                     if key == 'mealdb':
                         mealdb_recipes = result
                     else:
@@ -309,43 +318,33 @@ IMPORTANT: Return ONLY raw JSON. No markdown, no ```json fences, no text before/
             text = ing_names + " " + recipe_name
             return sum(1 for kw in pantry_keywords if kw in text)
 
-        # Skip obscure cuisines, score by relevance, take top 5
+        # Skip obscure cuisines, score by relevance, take top 3
         SKIP_AREAS = {'Japanese', 'Chinese', 'Vietnamese', 'Thai', 'Indian',
                       'Moroccan', 'Turkish', 'Egyptian', 'Tunisian', 'Croatian',
                       'Malaysian', 'Filipino', 'Kenyan'}
         candidates = [r for r in mealdb_recipes if r.get('area', '') not in SKIP_AREAS]
         candidates.sort(key=relevance_score, reverse=True)
-        filtered_mealdb = candidates[:5]
+        filtered_mealdb = candidates[:3]
 
-        all_refs = filtered_mealdb + ninjas_recipes[:3]  # Cap total references
+        all_refs = filtered_mealdb + ninjas_recipes[:2]  # Cap total references
         if not all_refs:
             return ""
 
-        must_use = min(len(all_refs), 3)
+        must_use = min(len(all_refs), 2)
 
         lines = [
-            f"\nREFERENCE RECIPES — MANDATORY (you MUST base at least {must_use} of your {self.max_suggestions} recipes on these):",
-            f"Your FIRST {must_use} recipes in the JSON array MUST be adapted from these references.",
-            "Simplify the recipe name if it's too fancy (e.g. 'Bubble & Squeak' → 'Bacon Potato Hash').",
-            "Adapt them to use pantry items. Set source/source_name/thumbnail as shown below.",
-            f"Only the remaining {self.max_suggestions - must_use} slots can be AI originals (source='ai').\n",
+            f"\nREFERENCE RECIPES (adapt at least {must_use} from these, rest can be original):",
+            "Simplify fancy names. Set source/source_name/thumbnail from reference.\n",
         ]
 
         for r in filtered_mealdb:
-            ing_list = ", ".join(i["name"] for i in r.get("ingredients", [])[:8])
-            lines.append(f"- {r['name']} ({r.get('area', 'Unknown')} {r.get('category', '')})")
-            lines.append(f"  Ingredients: {ing_list}")
-            if r.get("thumbnail"):
-                lines.append(f"  Thumbnail: {r['thumbnail']}")
-            lines.append(f"  → Set source='themealdb', source_name='{r['name']}', thumbnail='{r.get('thumbnail', '')}'")
-            lines.append("")
+            ing_list = ", ".join(i["name"] for i in r.get("ingredients", [])[:5])
+            thumb = r.get('thumbnail', '')
+            lines.append(f"- {r['name']}: {ing_list} (source='themealdb', thumbnail='{thumb}')")
 
-        for r in ninjas_recipes[:3]:
-            ing_list = ", ".join(i["name"] for i in r.get("ingredients", [])[:8])
-            lines.append(f"- {r['name']} (Servings: {r.get('servings', 'unknown')})")
-            lines.append(f"  Ingredients: {ing_list}")
-            lines.append(f"  → Set source='api-ninjas', source_name='{r['name']}', thumbnail=''")
-            lines.append("")
+        for r in ninjas_recipes[:2]:
+            ing_list = ", ".join(i["name"] for i in r.get("ingredients", [])[:5])
+            lines.append(f"- {r['name']}: {ing_list} (source='api-ninjas')")
 
         return "\n".join(lines)
 
